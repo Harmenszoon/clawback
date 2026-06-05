@@ -24,7 +24,7 @@ Numbers from real captured traffic — one actual turn, a fresh session with a s
 
 | | Before *(reconstructed)* | After *(measured)* |
 | --- | --- | --- |
-| System prompt | ~27 KB (~6,750 tok) | **420 chars (~105 tok)** |
+| System prompt | ~27 KB (~6,750 tok) | **~280 chars (~70 tok)** |
 | Tool definitions | ~33 tools (~23,000 tok) | **10 tools (~4,900 tok)** |
 | Reminders | present | **0** |
 | **Total request** | **~33,600 tokens** | **8,216 tokens** |
@@ -39,7 +39,7 @@ That's a **~75% smaller request — about 4× lighter** — with the model seein
 <summary><b>How we got these numbers</b></summary>
 
 - The **"after"** numbers are real and exact: forwarded sizes are read straight from `logs/`, and 8,216 is the figure the Anthropic API actually billed (`usage`) for that turn.
-- The **"before"** is reconstructed: Clawback only logs what it *forwards*, so the original isn't stored. We add back the measured sizes of what was stripped — the system-prompt delta (~27 KB observed → 420 chars) and the dropped tool definitions (the full built-in set measured at ~93 KB / ~23K tokens in the same logs; one tool, `Workflow`, is 20 KB by itself). ~4 characters per token.
+- The **"before"** is reconstructed: Clawback only logs what it *forwards*, so the original isn't stored. We add back the measured sizes of what was stripped — the system-prompt delta (~27 KB observed → ~280 chars) and the dropped tool definitions (the full built-in set measured at ~90 KB / ~23K tokens in the same logs; `Workflow`'s description alone is ~18 KB). ~4 characters per token.
 - Across turns, Clawback removes roughly **~25,000 tokens of fixed overhead per turn** — most of a short request, easing to a few percent once long conversation history dominates the payload.
 
 </details>
@@ -93,7 +93,7 @@ Mostly, no. We read through what Claude Code actually sends, and most of it is *
 
 **Nags about features you aren't using.** Every turn, Claude Code re-staples notes like *"The task tools haven't been used recently… consider using TaskCreate…"* and *"The date has changed… DO NOT mention this to the user, they are already aware."* If everyone already knows, repeating it to the model on every single turn is pure tax.
 
-**Manuals for tools you've turned off.** All **33 built-in tools** send their full descriptions — about **17,000 tokens** — on every request: Cron, notebooks, worktrees, plan mode, and the rest, whether you'd ever allow them or not.
+**Manuals for tools you've turned off.** All **33 built-in tools** ship their full definitions — about **23,000 tokens** — on every request: Cron, notebooks, worktrees, plan mode, and the rest, whether you'd ever allow them or not.
 
 **Hand-holding written for weaker models.** Lines like Bash's *"IMPORTANT: Avoid using this tool to run `find`, `grep`, `cat`, `head`, `tail`, `sed`, `awk`, or `echo`…"* lecture a 2026 model against mistakes it wouldn't make. Opus 4.8 doesn't need the warning label; it needs the task.
 
