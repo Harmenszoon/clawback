@@ -83,6 +83,17 @@ Every time you press Enter, Claude Code ships a phone book of boilerplate to the
 
 That's the ~25,000 tokens of fixed overhead, gone from every turn — and the model never has to read past it.
 
+## Wait, isn't that there for a reason?
+
+Mostly, no. Claude Code's prompt is **accreted, not curated**: it grows with every release and rarely shrinks. What Clawback strips is the dead weight that piles up:
+
+- **Instructions for older, weaker models.** Much of the behavioral prompt hand-holds the model through things **Opus 4.8** already gets right on its own. It was written for a generation that needed it.
+- **Overcorrection for mistakes that don't happen.** Every past incident leaves a permanent "never do X" rule behind, padding the prompt against errors a capable model rarely makes anymore.
+- **Redundancy on repeat.** The same rules restated, and `<system-reminder>` nudges re-stapled to *every* turn, long after the model has read them once.
+- **Manuals for tools you'll never use.** A 20 KB `Workflow` definition (plus Cron, notebooks, and the rest) ships on every request whether you'd let the model touch those tools or not.
+
+This isn't incompetence. It's the cost of **one prompt that has to serve every model, every user, and every edge case at once**: sensible for Anthropic to ship, wasteful for *you* to resend on every keystroke. Clawback re-tunes it for an audience of one — you, this machine, this model. And because every cut is fail-open, it's a safe bet: if something turns out to matter, it shows up in your logs and you switch it back on.
+
 ## Why smaller context matters
 
 Reclaiming context pays off twice:
