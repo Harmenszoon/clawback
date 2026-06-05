@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 
-from claude_proxy.sse import SSEAssembler
+from clawback.sse import SSEAssembler
 
 
 def _event(name: str, data: dict) -> bytes:

@@ -4,7 +4,7 @@ stream-error / unknown-event surfacing.
 
 from __future__ import annotations
 
-from claude_proxy.render import render
+from clawback.render import render
 
 
 def _base_record(resp_body: dict) -> dict:

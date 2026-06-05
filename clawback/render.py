@@ -7,7 +7,7 @@ record file (`NNN_*.json`) is paired with a matching `NNN_*.md`.
 Sections, in order: meta · request headers · request body summary · system
 blocks · tool index + per-tool detail · messages · response usage + content.
 
-Run retroactively as: `python -m claude_proxy.render <path-or-dir>`.
+Run retroactively as: `python -m clawback.render <path-or-dir>`.
 """
 
 from __future__ import annotations
@@ -401,7 +401,7 @@ def _fenced(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# CLI entry: `python -m claude_proxy.render <path>`
+# CLI entry: `python -m clawback.render <path>`
 # ---------------------------------------------------------------------------
 
 
@@ -414,7 +414,7 @@ def _render_file(json_path: Path) -> Path:
 
 def main(argv: list[str]) -> int:
     if not argv:
-        print("usage: python -m claude_proxy.render <path-or-dir> [...]", file=sys.stderr)
+        print("usage: python -m clawback.render <path-or-dir> [...]", file=sys.stderr)
         return 2
     targets: list[Path] = []
     for arg in argv:

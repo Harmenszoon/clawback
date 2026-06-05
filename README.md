@@ -1,561 +1,217 @@
-# claude_proxy
+<div align="center">
 
-[![CI](https://github.com/Harmenszoon/claude-proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/Harmenszoon/claude-proxy/actions/workflows/ci.yml)
+# Clawback
+
+### Less haystack. More needle.
+
+**A tiny local proxy that sits between Claude Code and Anthropic — clawing back the tokens the CLI wastes, and sharpening the model by keeping its context window on _your_ task instead of the harness's boilerplate.**
+
+[![CI](https://github.com/Harmenszoon/clawback/actions/workflows/ci.yml/badge.svg)](https://github.com/Harmenszoon/clawback/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
 [![License: Unlicense](https://img.shields.io/badge/license-Unlicense-blue.svg)](LICENSE)
 
-A small, sharp HTTP proxy that sits between Claude Code and the Anthropic
-API. It forwards every request upstream — and along the way applies a
-fail-open transform pipeline that removes known sources of wasted tokens,
-cache-invalidating noise, and unused tool definitions. It also repairs one
-client-side bug that would otherwise wedge a session (interleaved `thinking`
-blocks being reordered on resend — see **Repair** below).
-
-It also writes an exhaustive, human-readable log of every request and
-response so you can see exactly what Claude Code is doing and decide
-what else is worth trimming.
-
-> ⚠️ **Local, single-user tool.** It has no authentication, forwards your real
-> API credentials upstream, and its `logs/` directory contains your prompts,
-> file contents, and tool output in full. Bind it to `localhost` only and
-> sanitize logs before sharing. See [SECURITY.md](SECURITY.md).
+</div>
 
 ---
 
-## Why this exists
+## The problem
 
-Claude Code sends a very large amount of metadata, instructions, tool
-definitions, and per-turn reminders on every API call. Most of it is
-genuinely useful and load-bearing. Some of it is not — and the parts
-that are not still cost tokens, invalidate the prompt cache, or
-clutter the model's context with information that does not help it do
-the user's task.
+Every time you press Enter in Claude Code, the CLI quietly ships a **phone book** of boilerplate to the API — on *every single turn*:
 
-A few concrete examples we observed in real traffic and chose to address:
+- a **~27 KB** behavioral system prompt (rules the model already follows by default),
+- **~70 KB** of tool manuals — for **43** tools, most of which you'll never let it touch,
+- a fresh batch of `<system-reminder>` nudges re-stapled to your messages,
+- and separate **Opus** side-calls just to invent a chat title and to "recap" when you step away.
 
-* **Session-title generation.** On every new session Claude Code makes a
-  separate call to Opus with `effort: xhigh` to produce a 3–7 word title.
-  The title is shown in the `/resume` picker. An opaque-but-unique ID
-  serves the same purpose and costs zero tokens.
+You pay for all of it. Worse: the model has to read *past* all of it to find your actual question. **The bigger the haystack, the harder the needle is to find.**
 
-* **Recap-on-return.** When a user steps away from the CLI and comes
-  back, Claude Code asks the model for a ~40-word summary of the
-  conversation. The user can scroll up.
+## What Clawback does about it
 
-* **The behavioral system prompt.** ~27 KB of accumulated guidance shipped
-  on every main-conversation call. Most of it is tuning for cases the
-  model already handles correctly by default; a small slice (working
-  directory, platform) is the actual operational context the model needs.
+It intercepts that traffic and strips it down to what matters — without ever touching what the model actually needs:
 
-* **`<system-reminder>` injections.** Claude Code appends reminder blocks
-  to user messages — both as stand-alone content blocks and inline
-  inside `tool_result.content` strings. Their text changes (e.g. current
-  date), which means they invalidate the user-message prompt cache every
-  turn even when their substantive content has nothing to do with the
-  conversation. The `mid-conversation-system` beta added a third envelope
-  for the same material — stand-alone `role:"system"` messages in the
-  `messages` array (MCP-server instructions, the skills catalog, "you
-  haven't used the task tools" nudges) — which the proxy now trims too.
+| On every turn, Claude Code sends… | Clawback forwards… |
+| --- | --- |
+| 🧾 A **~27 KB** behavioral system prompt | The 3 lines that actually matter (working dir, platform, OS) + 1 directive → **~280 chars** |
+| 🧰 **43** tool definitions (**~70 KB**) | Only the tools *you've* allowed |
+| 🔔 `<system-reminder>` blocks, re-injected every turn | Gone — and kept out of history too, so the prompt cache stays warm |
+| 💸 A separate **Opus** call to title the chat + another to "recap" | Answered locally, instantly, for **0 tokens** |
 
-* **The interleaved-thinking reorder bug.** Not token waste — a correctness
-  bug in Claude Code that the proxy is well-placed to paper over. With
-  extended thinking + tool use, the API can return an assistant turn whose
-  `thinking` blocks are interleaved among `tool_use` blocks; it signs each
-  to its position and requires it back unchanged. Claude Code regroups them
-  to the front when it resends the turn with tool results, and the API
-  rejects the whole request with a 400, permanently wedging the session.
-  See **Repair**.
+Everything else flows through **untouched**.
 
-* **43 tool definitions on every call.** ~70 KB of tool descriptions
-  shipped on every request, including tools the user does not have any
-  intention of letting the model use (Cron, NotebookEdit, Worktree, MCP
-  authentication flows, etc.).
+## Two things happen when you stop shipping junk to the model
 
-The proxy is the right place to address these because it sees the full
-request as it leaves the client, can act surgically, and never has to
-modify Claude Code itself.
+### 💰 You stop paying for boilerplate
+Title generation and recap are full **Opus** inference calls — Clawback answers them locally for nothing. Reminders that change every turn stop busting your prompt cache. Tool manuals you'll never use stop riding along.
+
+> **Straight talk:** the giant system prompt is mostly *cached*, and cache reads are cheap — so the headline savings come from the killed Opus side-calls, the cache-busting churn we eliminate, and the un-cached deltas. Real money, no hand-waving.
+
+### 🧠 The model gets sharper
+This is the part caching **can't** fix. A cached token is still a token sitting in the context window, still competing for the model's attention. Caching makes the clutter *cheap*; it doesn't make it *invisible*. Clawback is the only lever that shrinks the haystack — so the needle (your task) is easier to find. *Less haystack, more needle.*
+
+## 🛟 It can't break your session
+
+A proxy that mangles your traffic is worse than no proxy. So every transform is **fail-open**:
+
+- If it doesn't recognize something with **certainty**, it forwards your request **untouched**. The worst case is paying full price for one request — never a corrupted one.
+- Detection keys off **structure** (JSON schema shape, tool names, Markdown landmarks) — not wording — so an Anthropic copy-edit can't trip it.
+- When detection *does* drift, the un-stripped content simply shows up in the log. That's your signal, not a silent failure.
+
+Backed by **53 tests** running on Linux, macOS, and Windows across Python 3.11–3.13.
+
+## ⚡ Quickstart
+
+```bash
+pip install -r requirements.txt
+python -m clawback
+```
+
+Then point Claude Code at it and go:
+
+```powershell
+# PowerShell
+$env:ANTHROPIC_BASE_URL = "http://localhost:3456"
+claude
+```
+```bash
+# bash / zsh
+export ANTHROPIC_BASE_URL=http://localhost:3456
+claude
+```
+
+That's it. `Ctrl+C` to stop. Requires Python 3.11+; the only runtime deps are `aiohttp` and `certifi`.
 
 ---
 
-## What it does
+## 🎁 Bonus: it fixes a bug that wedges sessions
 
-There are two kinds of intervention:
+With extended thinking + tool use, the API returns `thinking` blocks interleaved among `tool_use` blocks and requires them back **in the exact same order** (it cryptographically signs each one). Claude Code sometimes regroups them on resend — and the API rejects the whole turn with a 400, **permanently wedging the session**.
 
-**1. Short-circuit — answer locally, never call upstream.**
+Clawback remembers the original order and quietly restores it before forwarding. The repair is reorder-only, exact-match-or-nothing, and fails open on any doubt — so it can never make a request worse than the client already made it. You just stop hitting the wall.
 
-| Transform | Trigger | Synthetic response |
-|-----------|---------|--------------------|
-| `title-gen` | A request whose `output_config.format.json_schema` requires a `title` field | `{"title": "CONVERSATION_<8 hex chars>"}` |
-| `recap`     | The last user message is a string starting with `"The user stepped away and is coming back. Recap"` | `"Continuing."` |
+## 🔍 Everything is logged, beautifully
 
-Detection in both cases uses structural signals (schema shape, content
-shape and exact prefix) — not the surrounding prose — so neither breaks
-if Anthropic edits the wording of the instruction.
+Clawback writes a complete, human-readable record of every request and response — so you can finally answer *"what is Claude Code actually sending?"* by opening one file.
 
-**2. Mutation — modify the request, then forward it.**
+- `NNN_*.json` — the full structured record (the source of truth).
+- `NNN_*.md` — a paired, readable rendering: system blocks sized and cache-flagged, a tool index, every message block annotated, usage breakdown.
+- `index.jsonl` — one line per request to scan or grep.
+
+Each record is flagged with whether Clawback intervened and how. Credentials and the `metadata.user_id` telemetry blob are redacted in the logs (but still forwarded upstream).
+
+## 🎛️ You're the policy — `tools.json`
+
+Which tools reach the model is **entirely yours to decide**, in a plain JSON file you edit at your leisure:
+
+```json
+{ "Read": true, "Edit": true, "WebSearch": true, "Bash": false, "TaskCreate": false }
+```
+
+- Edits take effect on the **next request** — no restart.
+- A tool Clawback has never seen defaults to **allowed** and is added to the file, so nothing ever breaks silently — it just shows up for you to decide.
+- Writes are atomic; a broken file fails *safe* (allow-all + a warning, never a silent wipe of your config).
+
+Start from the checked-in [`tools.json.example`](tools.json.example).
+
+---
+
+## How it works
+
+```
+                       ┌──────────────┐
+   claude  ──HTTP──▶   │   Clawback   │   ──HTTP──▶  api.anthropic.com
+                       │  (localhost) │
+                       └──────┬───────┘
+                              │
+   ┌──────────────┬───────────┴──────────┬──────────────────┐
+   ▼              ▼                       ▼                  ▼
+ short-circuit  mutate request        repair               log
+ (title, recap) (shrink prompt,    (restore thinking     (JSON + Markdown
+  → answered    filter tools,        block order)         + index)
+   locally)     strip reminders)
+```
+
+For each request Clawback either (1) **answers it locally** if it's a known auxiliary call (title, recap), or (2) **slims it** (reduce the system prompt, filter tools, strip reminders), repairs any reordered thinking blocks, forwards it, and streams the reply back **byte-for-byte** while assembling a copy for the log.
+
+### The transforms
 
 | Transform | What it does |
-|-----------|--------------|
-| `reduce-main-system` | Finds the longest cached text block in the request's `system` array, verifies it has both an env-section landmark (`# Environment` or the older sentence preamble) **and** at least two of the three operational env-field labels (`Primary working directory:`, `Platform:`, `OS Version:`), then replaces the block's text with just those three lines plus one short behavioral directive about tool selection. |
-| `strip-system-reminders` | Removes Claude Code's injected reminders in all three forms. A user-message text block that is wholly a `<system-reminder>` is dropped; an embedded reminder inside `tool_result.content` (string or list of sub-blocks) is excised in place; and a stand-alone `role:"system"` message (the `mid-conversation-system` envelope) is trimmed *by relevance* — recognized transient nudges are dropped, an MCP-instructions or skills-catalog block is kept only while a tool it documents is still enabled (so re-enabling a tool restores its guidance), and anything unrecognized passes through untouched. |
-| `filter-tools` | Reads `tools.json` and strips any tool whose entry is `false`. Tools the file has not seen before are auto-added with `true` and persisted, so new tools from upstream are never silently dropped. A tool pinned by `tool_choice` is always kept even if denied — dropping a forced tool would make the API reject the request, so request validity wins over the deny (and the override is logged). |
+| --- | --- |
+| `title-gen` *(short-circuit)* | Detects the title-request schema and returns a synthetic `CONVERSATION_<hex>` — no upstream call. |
+| `recap` *(short-circuit)* | Detects the "user stepped away" prompt and returns `"Continuing."` instead of paying Opus to summarize. |
+| `reduce-main-system` | Replaces the ~27 KB behavioral prompt with the operational env lines + one tool-selection directive. |
+| `filter-tools` | Drops tools disabled in `tools.json`; auto-discovers new ones; never drops a tool the request *forces* via `tool_choice`. |
+| `strip-system-reminders` | Removes injected reminders in all three forms (standalone blocks, inline in tool results, and `role:"system"` messages), consistently across history so the cache prefix holds. |
+| `restore-thinking-order` *(repair)* | Undoes Claude Code's interleaved-thinking reordering using the original order Clawback recorded. |
 
-If any transform's detection misses, the request flows through unchanged.
-The mutation is **never** applied speculatively. The un-stripped content
-showing up in the next log is the signal that something upstream has
-shifted and our detection needs an update.
+## Configuration
 
-**3. Repair — restore order the client corrupted.**
+All settings are environment variables (optionally from a `.env` file):
 
-| Repair | What it does |
-|--------|--------------|
-| `restore-thinking-order` | Works around the interleaved-thinking reorder bug above (Claude Code's `ensureToolResultPairing` path). The proxy remembers each response's canonical content-block order and, when a later request resends that turn with the `thinking` blocks regrouped, reorders the request's *own* blocks back into the original positions before forwarding — so the API sees the order it signed. |
+| Variable | Default | Description |
+| --- | --- | --- |
+| `PROXY_HOST` | `localhost` | Bind address |
+| `PROXY_PORT` | `3456` | Listen port |
+| `PROXY_TARGET_URL` | `https://api.anthropic.com` | Upstream API endpoint |
 
-Unlike the transforms, this repair is **stateful**: it keeps a small,
-session-scoped, LRU-bounded memory of recent responses (`thinking_order.py`,
-owned by the handler for the process lifetime). It matches a turn only by
-exact block identity (thinking signature, redacted-data hash, tool-use
-id + name + canonical-input hash, text hash), reorders only — never
-substitutes — and fails open on any cache miss, ambiguity, or mismatch. It
-therefore can never make a request worse than the client already made it; a
-proxy restart just means an already-generated turn isn't repairable until a
-fresh turn is observed.
+## FAQ
 
----
+**Will it break Claude Code?**
+No transform mutates a request it isn't certain about — it fails open and forwards the original. The worst case is a missed optimization, never a broken request.
 
-## Architecture at a glance
+**Does it phone home or read my data?**
+It runs entirely on your machine. Nothing leaves except the (slimmer) request to Anthropic you were already making. Your credentials pass straight through; logs stay local and are gitignored.
 
-```
-                       ┌────────────────┐
-   claude CLI ──HTTP──▶│  ProxyHandler  │──HTTP──▶ api.anthropic.com
-                       │   (server.py)  │
-                       └───────┬────────┘
-                               │
-        ┌──────────────┬────────┴───────┬─────────────────┐
-        ▼              ▼                ▼                 ▼
- maybe_shortcut  apply_request_  ThinkingOrderCache   SSEAssembler
- (transforms.py)  transforms()   (thinking_order.py)  (sse.py)
-                 (transforms.py)  repair / record           │
-                                                            ▼
-                                                       RunLogger
-                                                       (log.py)
-                                                             │
-                                                             ▼
-                                            logs/<UTC ts>/NNN_*.{json,md}
-```
+**Will it slow me down?**
+It's an async passthrough. Transforms are microseconds; the upstream call is seconds. Streaming responses are forwarded chunk-by-chunk, unchanged.
 
-Each request handler call:
+**Does it work with my MCP servers / OS / tool setup?**
+Yes. `tools.json` is yours; unknown tools default to allowed and appear in the file for you to decide. Swap `PowerShell` for `Bash` off Windows.
 
-1. Reads the body and tries to parse it as JSON.
-2. Asks `maybe_shortcut` whether the request can be answered locally.
-   If yes, emits a synthetic streaming or non-streaming response and
-   records it. Returns. No upstream call is made.
-3. Otherwise calls `apply_request_transforms`, then asks the
-   `ThinkingOrderCache` to `restore-thinking-order` on any assistant turn
-   the client has reordered (using the canonical order remembered from a
-   prior response). If anything ran, the modified body is re-serialized and
-   replaces the original bytes.
-4. Forwards the request upstream. The response is streamed to the
-   client byte-for-byte. An `SSEAssembler` runs in parallel against the
-   same stream so the log can capture the response as a single
-   assembled message dict rather than a thousand SSE events — and that
-   assembled message's block order is recorded for the repair in step 3.
-5. The `RunLogger` writes both a structured JSON record and a paired
-   human-readable markdown rendering, then appends a one-line summary to
-   `index.jsonl`.
-
-Everything is async. Log writes are dispatched to a worker thread (and
-spawned as fire-and-forget tasks so responses are never blocked on disk
-I/O). `tools.json` reads happen inline on the event loop — sub-millisecond
-against the OS file cache, and the simplicity is worth it for a
-single-user proxy. See "Trade-offs we deliberately accepted" below.
+**Is it safe to run?**
+It's a localhost, single-user tool with no auth, and its logs contain your prompts and tool output. Keep it bound to `localhost` and don't publish logs raw. See [SECURITY.md](SECURITY.md).
 
 ---
 
 ## Design principles
 
-These principles inform every transform and every choice about what to
-strip versus what to leave alone.
-
-**Detect structurally, never on prose.** Tool names, JSON schema shape,
-Markdown heading landmarks, and tag boundaries are stable contracts. The
-sentence around them can be rewritten at any time. We always pick a
-signal that survives a rewording.
-
-**Fail open, never silently break.** A transform that cannot find what it
-expects must return the request unchanged. The cost of a missed
-optimization (paying full price for one request) is much lower than the
-cost of a silent corruption (model loses real context and behaves
-oddly). The un-stripped content reappearing in the log is the
-self-healing signal that detection needs updating.
-
-**Cache prefix consistency.** Some transforms (`strip-system-reminders`
-in particular) must be applied to *every* user message in *every* turn,
-including the conversation history. If we stripped the latest turn but
-left history's reminders in place, the historical messages would
-re-appear in the next request with their original (unstripped) content,
-and the prompt cache would miss on the boundary every turn. We strip
-from history too so the cached prefix is deterministic.
-
-**Copy-on-write.** Mutating transforms never modify the dict they receive.
-They build a new dict for any container they need to change and leave the
-rest aliased. The caller's record of the original request body — used
-when writing the log entry — is preserved unchanged.
-
-**The user is the policy.** The choice of *which* tools to allow is
-controlled entirely by `tools.json`, which the user owns and edits at
-their leisure. The proxy does not pre-judge: any tool name it has not
-seen before defaults to `true` and is added to the file for the user
-to inspect.
-
-**Exhaustive logs, by default.** Every request gets a complete record
-(headers, full body, response body assembled from SSE). Per-request
-markdown files make the records reviewable without needing tooling. The
-goal is for the operator to be able to answer "what is Claude Code
-actually sending?" by reading a single file.
-
----
-
-## What gets logged
-
-Each proxy startup creates a fresh `logs/<UTC-timestamp>/` directory. For
-every request the proxy handles, four artifacts may be written:
-
-| File | Purpose |
-|------|---------|
-| `NNN_<path-slug>.json` | Full structured record: timestamp, elapsed time, method, path, sanitized request headers, request body **as forwarded** (post-transform), response status, sanitized response headers, response body (parsed JSON for non-streaming, assembled message dict for SSE). For SSE, out-of-band events outside the normal message lifecycle are captured too — `error` events and any unrecognized event shape are recorded on the assembled message, so an error-only stream is never logged as an empty success. Lossless source of truth, modulo the log-only redactions noted under **Redaction**. |
-| `NNN_<path-slug>.md` | Paired human-readable rendering of the same record: outlined sections, system blocks sized and cache-flagged, tool index table plus per-tool details, messages with each content block annotated, response with usage breakdown. This is the file to open first when reviewing. |
-| `index.jsonl` (single, append-only) | One JSON line per request: seq, ts, elapsed, method, path, status, model, stream flag, stop_reason, usage, plus `short_circuited` / `transforms_applied` markers when relevant. |
-| `console.log` (single, per run) | Captured stdout/stderr for the entire run. |
-
-The header at the top of every markdown record explicitly flags whether
-the request was short-circuited locally or which transforms were applied
-before forwarding, so a glance answers "did the proxy intervene here?"
-
-### Inspecting
-
-```bash
-ls logs/                                # runs, sorted chronologically
-cat logs/<run>/index.jsonl              # one-line-per-request overview
-cat logs/<run>/002_messages.md          # detailed reading of one request
-```
-
-If you change `render.py` and want to rebuild the markdown views for an
-existing run:
-
-```bash
-python -m claude_proxy.render logs/<run>/        # whole directory
-python -m claude_proxy.render logs/<run>/002_messages.json   # one file
-```
-
-The `.json` files are the source of truth (the parsed request/response with
-log-only redactions applied — see **Redaction**); the `.md` files can always
-be regenerated from them.
-
-### Redaction
-
-The following are replaced with `<redacted>` in the log files only — the
-real values are always forwarded upstream unchanged:
-
-* **Headers:** `Authorization`, `x-api-key`, `Cookie`, `Set-Cookie`,
-  `Proxy-Authorization`, and `X-Claude-Code-Session-Id`.
-* **Request body:** `metadata.user_id` — the telemetry blob carrying
-  `device_id`, `account_uuid`, and `session_id`. Upstream still receives the
-  real value (billing and rate-limit reconciliation depend on it); only the
-  on-disk copy is scrubbed, since that is the one likely to be pasted, zipped,
-  or shared. The whole value is replaced rather than parsed — the device and
-  account ids are more durable identifiers than the session id, so a
-  half-redaction would be little better than none.
-
-Redaction is the only place the logged request *content* diverges from what
-was forwarded (the body is otherwise the full parsed request, re-serialized).
-The logs still contain your prompts, file contents, and command output, so
-redaction makes them *tidier*, not *safe to publish* — review before sharing.
-
----
-
-## Tool filtering — `tools.json`
-
-A JSON object mapping tool name to a boolean. `true` allows the tool;
-`false` strips it from the forwarded request.
-
-```json
-{
-  "Bash": false,
-  "PowerShell": true,
-  "Read": true,
-  "CronCreate": false,
-  ...
-}
-```
-
-* The file is at the project root, named `tools.json`.
-* It is read on **every request** — file I/O is microseconds; the
-  upstream call is seconds — so edits take effect on the very next
-  request. No proxy restart required.
-* On the first request to ever reach a fresh proxy install, the file
-  does not exist yet. The proxy creates it, populating it with every
-  tool name from that request set to `true`. The user then edits the
-  file to disable whatever they want.
-* When a request contains a tool name not in the file, the proxy
-  defaults it to `true` and appends it to the file. **New tools never
-  break silently.** They appear in `tools.json` so the user can decide.
-* Writes are atomic (write to `tools.json.tmp` then `os.replace`) so a
-  concurrent read can never observe a half-written file.
-* If the file is missing, malformed, or unreadable, the proxy falls
-  back to allow-all for that request and prints a one-line warning. A
-  malformed file will **not** be silently overwritten — the proxy
-  refuses to persist new discoveries until the file is valid again, so a
-  typo cannot wipe the user's careful allow/deny config.
-* The value schema is forward-compatible. The loader accepts both bare
-  `true`/`false` and `{"allow": true}` object form, so future per-tool
-  metadata (description overrides, parameter restrictions, etc.) can be
-  added without breaking existing config files.
-* A tool that the request **forces** via `tool_choice`
-  (`{"type":"tool","name":...}`) is kept even when `tools.json` denies it.
-  Stripping a tool while leaving the request pinning it by name makes the
-  API return a 400 — a proxy-manufactured failure, which the fail-open
-  contract forbids. Your deny is honored on a best-effort basis; a valid
-  request takes precedence, and the override is logged to the console.
-
-Your real `tools.json` is gitignored (it ends up holding your own MCP servers
-and OS-specific choices). A `tools.json.example` is checked in as a lean
-starting point: the file/search core (`Edit`, `Glob`, `Grep`, `Read`,
-`Write`), `PowerShell`, and the web tools (`WebFetch`, `WebSearch`, the
-`web_search` server tool) enabled — with the agent/cron/task/worktree/skill/
-notebook surface disabled. Treat it as a template, not a prescription:
-`PowerShell` reflects a Windows host (swap in `Bash` elsewhere), and it lists
-no `mcp__*` entries because those are specific to your own MCP setup — they're
-auto-added with `true` the first time the proxy sees them, so you can decide.
-Copy it to `tools.json` (or just let the proxy create one on the first
-request), then edit; changes take effect on the very next request.
-
----
-
-## Setup
-
-Requires Python 3.11+.
-
-```bash
-pip install -r requirements.txt
-cp .env.example .env                 # optional — the defaults usually work
-cp tools.json.example tools.json     # optional — the proxy creates one if absent
-```
-
-The only runtime dependencies are `aiohttp` for the HTTP server/client
-and `certifi` for the TLS CA bundle. The package is also pip-installable
-(`pip install .`), which exposes a `claude-proxy` console command equivalent
-to `python -m claude_proxy`.
-
----
-
-## Run
-
-```bash
-python -m claude_proxy
-```
-
-You should see:
-
-```
-Proxy running on http://localhost:3456
-Forwarding to https://api.anthropic.com
-Logs:        /path/to/logs/2026-05-28T01-24-56
-```
-
-Then point Claude Code at it:
-
-PowerShell:
-```powershell
-$env:ANTHROPIC_BASE_URL = "http://localhost:3456"
-claude
-```
-
-bash/zsh:
-```bash
-export ANTHROPIC_BASE_URL=http://localhost:3456
-claude
-```
-
-`Ctrl+C` stops the proxy.
-
----
-
-## Tests
-
-```bash
-pip install -r requirements-dev.txt
-python -m pytest          # tests
-ruff check .              # lint
-ruff format --check .     # formatting
-```
-
-The suite covers the transforms (tool filtering incl. `tool_choice`
-reconciliation, reduce-main-system, the title-gen/recap short-circuits,
-strip-system-reminders), the `SSEAssembler` (error/unknown event capture and
-UTF-8 chunk boundaries), the thinking-order repair, log redaction, the
-renderer, and the async handler end-to-end against a fake upstream
-(`tests/test_server.py`). No network or running proxy is required. The same
-three commands run in CI on Linux, macOS, and Windows across Python 3.11–3.13.
-
----
-
-## Configuration
-
-All settings are environment variables, optionally loaded from a `.env`
-file in the project root.
-
-| Variable           | Default                       | Description |
-|--------------------|-------------------------------|-------------|
-| `PROXY_HOST`       | `localhost`                   | Bind address |
-| `PROXY_PORT`       | `3456`                        | Listen port |
-| `PROXY_TARGET_URL` | `https://api.anthropic.com`   | Upstream API endpoint |
-
----
+- **Detect structurally, never on prose.** Schema shapes and tool names are contracts; the sentences around them are not.
+- **Fail open, never silently break.** A missed optimization is cheap; a corrupted request is not.
+- **Copy-on-write.** Transforms never mutate the object they receive.
+- **The user is the policy.** `tools.json` decides; Clawback never pre-judges.
+- **Exhaustive logs by default.** If you can't see it, you can't trim it.
 
 ## Project layout
 
 ```
-claude_proxy/
-  __init__.py        package metadata + version
-  __main__.py        entry point; tees stdout/stderr into the run's console.log
-  config.py          env loading, host/port/target, header strip lists
+clawback/
+  __main__.py        entry point (python -m clawback); tees output to console.log
   server.py          aiohttp app + the request handler that drives the pipeline
-  transforms.py      short-circuit + mutation transforms (title-gen, recap,
-                     reduce-main-system, strip-system-reminders, filter-tools)
-  thinking_order.py  stateful repair: remembers canonical block order, undoes
-                     the client's interleaved-thinking reordering on resend
-  tool_filter.py     dynamic `tools.json` allowlist with atomic writes
-  sse.py             SSE stream parser — observation-only, used for the log
-  log.py             RunLogger: per-run dir, file-per-request, index.jsonl
-  render.py          JSON record → human-readable markdown view
-tests/               pytest suite (transforms, SSE, repair, redaction,
-                     renderer, and an end-to-end async handler test)
-.github/             CI workflow + issue/PR templates
-pyproject.toml       packaging metadata, console entry point, ruff + pytest config
-requirements.txt     runtime dependencies
-requirements-dev.txt runtime + test/lint dependencies
-CHANGELOG.md         notable changes per version
-CONTRIBUTING.md      dev setup, the three CI gates, design principles
-SECURITY.md          threat model, log-sensitivity, vulnerability reporting
-LICENSE              The Unlicense (public domain)
-tools.json.example   template allowlist (checked in)
-tools.json           per-user allow/deny config (gitignored, auto-created)
-.env.example         template config (checked in)
-.env                 local secrets (gitignored)
-logs/                runtime artifacts (gitignored)
+  transforms.py      short-circuits + mutations (title, recap, reduce, strip, filter)
+  thinking_order.py  stateful repair for the interleaved-thinking reorder bug
+  tool_filter.py     dynamic tools.json allowlist with atomic writes
+  sse.py             SSE stream assembler (observation-only, for the log)
+  log.py / render.py per-run logging + JSON→Markdown rendering
+  config.py          env loading, paths, header filters
+tests/               pytest suite (transforms, SSE, repair, redaction, async handler)
+.github/             CI + issue/PR templates
 ```
 
----
+## Development
 
-## Trade-offs we deliberately accepted
+```bash
+pip install -r requirements-dev.txt
+python -m pytest          # 53 tests, no network needed
+ruff check . && ruff format --check .
+```
 
-These are choices we considered, evaluated, and chose to live with. Future
-contributors should know about them so they understand why the code looks
-the way it does.
-
-* **Single-user scope.** The proxy serves one developer's Claude Code
-  CLI. We do not coordinate across concurrent processes, do not lock
-  log writes, and do not strictly serialize the read-modify-write of
-  `tools.json`. In a real concurrent setting two simultaneous "new
-  tool" discoveries could race and lose one update. For the realistic
-  workload (one CLI, requests issued sequentially) the simpler shape is
-  the right one.
-
-* **Test coverage is good but not total.** `tests/` covers the transforms
-  (tool filtering incl. `tool_choice` reconciliation, reduce-main-system, the
-  title-gen/recap short-circuits, strip-system-reminders), the `SSEAssembler`
-  (out-of-band events and UTF-8 chunk boundaries), the thinking-order repair,
-  log redaction, the renderer, and the async handler end-to-end
-  (`tests/test_server.py` drives the real pipeline against a fake upstream).
-  What's still only validated against real traffic is the long-tail of
-  upstream-shape drift — which is exactly what the logs are there to catch.
-
-* **`metadata.user_id` is forwarded but log-redacted.** Anthropic uses
-  this for billing reconciliation and rate-limit attribution, so the proxy
-  passes the real value upstream unchanged — but redacts it in the on-disk
-  log (see **Redaction**). The forwarded request and the logged request
-  therefore differ in exactly this one field (plus the redacted headers).
-
-* **Disk reads on the event loop for `tools.json`.** We read the file
-  from inside the request handler coroutine on every request. Reads
-  are sub-millisecond against the OS file cache; the upstream API call
-  takes seconds. Caching the config in memory was considered and
-  rejected because it would introduce a "is the file or the memory the
-  truth?" question and would prevent edit-and-it-takes-effect-now
-  behavior.
-
-* **The behavioral instruction in the reduced system prompt names
-  shells but not file tools.** When the original 27 KB behavioral
-  prompt is removed, the model occasionally reaches for shell idioms
-  (`cat`, `Get-Content`) when a dedicated file tool is available. We
-  paste in one sentence to discourage that, but we deliberately do
-  *not* name specific tools (Read, Glob, etc.) in the rule because the
-  user may have disabled some of them via `tools.json`. The rule reads
-  as a conditional: shells are forbidden *when* another available tool
-  handles the operation.
-
-* **Compaction (`/compact`) is not short-circuited.** Compaction
-  produces a substantive summary that Claude Code uses when context
-  fills up. It is one of the few aux calls whose output is genuinely
-  load-bearing.
-
----
-
-## What we observed but did not (yet) handle
-
-These showed up in real traffic and were noted as candidates for future
-work:
-
-* **`count_tokens` calls.** Claude Code occasionally hits
-  `/v1/messages/count_tokens` to measure the size of a file before
-  acting on it. The endpoint is cheap (no inference, just a token
-  count) and our transforms correctly do not fire on it. Could be
-  short-circuited locally with `tiktoken` or similar; the savings are
-  small.
-
-* **Stripping `metadata.user_id` from the forwarded request.** We log-redact
-  it (see **Redaction**) but still forward the real value, because billing
-  reconciliation depends on it. Dropping it from the upstream request entirely
-  is possible but would forfeit per-device attribution; we have not done it.
-
----
-
-## Extending it
-
-**Adding a new short-circuit.** Write a `_is_<something>(body)`
-predicate and a `_synthesize_<something>_response(body)` builder in
-`transforms.py`, then add a third clause to `maybe_shortcut`. The
-detection should pick the most stable structural signal in the request
-shape, never prose. Test against a captured log entry before relying
-on it.
-
-**Adding a new mutation.** Write a function that takes the body and
-returns either the modified body or `None` (no-op). Chain it into
-`apply_request_transforms`. Use copy-on-write — do not mutate the
-input. Use the same fail-open pattern: if anything you expect to find
-is missing, return `None`.
-
-**Adding per-tool metadata.** `tool_filter._coerce_allow` already
-accepts both `bool` and `{"allow": bool, ...}` values, so the schema
-can grow without breaking existing config files. Add the new field,
-read it in `filter_tools` where the tool's description or schema is
-about to be passed through.
-
----
-
-## Acknowledgements
-
-This project replaces an earlier prototype that hard-coded its tool
-list and prompt rewrites inline. The current shape — fail-open
-detection, copy-on-write transforms, dynamic `tools.json`,
-per-request file-and-markdown logs — is the result of iterating
-against real Claude Code traffic and observing what actually broke
-when we got it wrong.
-
----
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the design rules and how to add a transform. The same gates run in CI across three OSes and Python 3.11–3.13.
 
 ## License
 
-Released into the public domain under [The Unlicense](LICENSE). Do whatever
-you want with it — copy, modify, sell, redistribute — no attribution required.
+[The Unlicense](LICENSE) — public domain. Do whatever you want with it; no attribution required.
+
+---
+
+<div align="center">
+<sub>Clawback is an independent project and is not affiliated with or endorsed by Anthropic.</sub>
+</div>

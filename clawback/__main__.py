@@ -1,4 +1,4 @@
-"""Entry point: `python -m claude_proxy`.
+"""Entry point: `python -m clawback`.
 
 Boots the server and tees stdout/stderr into the active run's `console.log`
 so crashes and prints are captured alongside the per-request JSON files.

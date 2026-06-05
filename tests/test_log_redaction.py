@@ -6,8 +6,8 @@ from __future__ import annotations
 
 import copy
 
-from claude_proxy.config import SENSITIVE_HEADERS
-from claude_proxy.log import _sanitize_headers, _sanitize_request_body
+from clawback.config import SENSITIVE_HEADERS
+from clawback.log import _sanitize_headers, _sanitize_request_body
 
 
 def test_session_id_header_is_redacted():

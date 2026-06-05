@@ -7,8 +7,8 @@ from __future__ import annotations
 import copy
 import json
 
-from claude_proxy.sse import SSEAssembler
-from claude_proxy.transforms import (
+from clawback.sse import SSEAssembler
+from clawback.transforms import (
     apply_request_transforms,
     maybe_shortcut,
     to_sse_bytes,

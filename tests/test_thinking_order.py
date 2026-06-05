@@ -4,7 +4,7 @@ an errored stream is never treated as a canonical successful turn.
 
 from __future__ import annotations
 
-from claude_proxy.thinking_order import ThinkingOrderCache
+from clawback.thinking_order import ThinkingOrderCache
 
 
 def _canonical_content():

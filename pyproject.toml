@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "claude-proxy"
+name = "clawback"
 description = "A fail-open HTTP proxy between Claude Code and the Anthropic API that trims token waste, repairs a client reordering bug, and logs every request."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -26,21 +26,21 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8,<10", "pytest-asyncio>=0.23,<2", "ruff>=0.14.10,<0.15"]
 
-# NOTE: update the slug below if the GitHub repo isn't `Harmenszoon/claude-proxy`.
+# NOTE: update the slug below if the GitHub repo isn't `Harmenszoon/clawback`.
 [project.urls]
-Homepage = "https://github.com/Harmenszoon/claude-proxy"
-Source = "https://github.com/Harmenszoon/claude-proxy"
-Issues = "https://github.com/Harmenszoon/claude-proxy/issues"
-Changelog = "https://github.com/Harmenszoon/claude-proxy/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/Harmenszoon/clawback"
+Source = "https://github.com/Harmenszoon/clawback"
+Issues = "https://github.com/Harmenszoon/clawback/issues"
+Changelog = "https://github.com/Harmenszoon/clawback/blob/main/CHANGELOG.md"
 
 [project.scripts]
-claude-proxy = "claude_proxy.__main__:_run"
+clawback = "clawback.__main__:_run"
 
 [tool.setuptools]
-packages = ["claude_proxy"]
+packages = ["clawback"]
 
 [tool.setuptools.dynamic]
-version = { attr = "claude_proxy.__version__" }
+version = { attr = "clawback.__version__" }
 
 [tool.ruff]
 line-length = 120
@@ -56,7 +56,7 @@ select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
 "tests/*" = ["E501"]
 
 [tool.pytest.ini_options]
-# Put the project root on sys.path so `import claude_proxy` works without an
+# Put the project root on sys.path so `import clawback` works without an
 # install step, and keep test collection scoped to tests/.
 pythonpath = ["."]
 testpaths = ["tests"]

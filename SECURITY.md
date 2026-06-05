@@ -1,6 +1,6 @@
 # Security & Privacy
 
-`claude_proxy` sits in the path of your Claude Code traffic and writes an
+`clawback` sits in the path of your Claude Code traffic and writes an
 exhaustive log of every request and response. Please read this before running
 it anywhere other than your own machine.
 
@@ -35,4 +35,4 @@ issue, please open a [GitHub Security Advisory][advisory] (preferred) or a
 regular issue if it is not sensitive. There is no formal SLA, but reports are
 welcome and will be addressed on a best-effort basis.
 
-[advisory]: https://github.com/Harmenszoon/claude-proxy/security/advisories/new
+[advisory]: https://github.com/Harmenszoon/clawback/security/advisories/new

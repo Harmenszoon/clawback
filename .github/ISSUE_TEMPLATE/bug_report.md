@@ -21,7 +21,7 @@ Steps, and the relevant request shape if you can share it.
 **Environment**
 - OS:
 - Python version:
-- `claude_proxy` version (`python -c "import claude_proxy; print(claude_proxy.__version__)"`):
+- `clawback` version (`python -c "import clawback; print(clawback.__version__)"`):
 - Claude Code CLI version:
 
 **Relevant log / console output**

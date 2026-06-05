@@ -14,8 +14,8 @@ import json
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from claude_proxy.log import RunLogger
-from claude_proxy.server import ProxyHandler
+from clawback.log import RunLogger
+from clawback.server import ProxyHandler
 
 # --- fakes -------------------------------------------------------------------
 

@@ -8,7 +8,7 @@ unanchored inline regex from rewriting user-authored text. The contract:
 
 from __future__ import annotations
 
-from claude_proxy.transforms import apply_request_transforms
+from clawback.transforms import apply_request_transforms
 
 REMINDER = "<system-reminder>Do the thing now.</system-reminder>"
 

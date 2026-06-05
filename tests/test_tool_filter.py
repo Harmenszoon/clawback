@@ -9,7 +9,7 @@ import json
 
 import pytest
 
-from claude_proxy import tool_filter
+from clawback import tool_filter
 
 
 @pytest.fixture

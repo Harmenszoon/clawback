@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [semantic versioning](https://semver.org/).
 
+## [0.4.0] — 2026-06-05
+
+### Changed
+- **Renamed the project to `clawback`** (was `claude_proxy`). The import path,
+  distribution name, and console command are all `clawback` now
+  (`python -m clawback` / `clawback`). No behavior changed.
+- Rewrote the README as a landing page.
+
 ## [0.3.0] — 2026-06-05
 
 ### Added
@@ -16,7 +24,7 @@ All notable changes to this project are documented here. The format is based on
   reconciliation depend on them); only the on-disk copy is scrubbed.
 - **Test suite** (`tests/`, pytest) covering tool filtering, SSE assembly,
   strip-system-reminders, the thinking-order repair, and log redaction.
-- **Packaging metadata** in `pyproject.toml` and a `claude-proxy` console entry
+- **Packaging metadata** in `pyproject.toml` and a `clawback` console entry
   point; `tools.json.example` template; `requirements-dev.txt`.
 - **License:** released into the public domain under The Unlicense.
 - **Project infrastructure for public release:** GitHub Actions CI (ruff lint +
