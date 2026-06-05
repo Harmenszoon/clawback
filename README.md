@@ -19,7 +19,7 @@
 Every time you press Enter in Claude Code, the CLI quietly ships a **phone book** of boilerplate to the API — on *every single turn*:
 
 - a **~27 KB** behavioral system prompt (rules the model already follows by default),
-- **~70 KB** of tool manuals — for **43** tools, most of which you'll never let it touch,
+- **~90 KB** of tool manuals — *dozens* of tool definitions (one is 20 KB by itself), most of which you'll never let it touch,
 - a fresh batch of `<system-reminder>` nudges re-stapled to your messages,
 - and separate **Opus** side-calls just to invent a chat title and to "recap" when you step away.
 
@@ -32,7 +32,7 @@ It intercepts that traffic and strips it down to what matters — without ever t
 | On every turn, Claude Code sends… | Clawback forwards… |
 | --- | --- |
 | 🧾 A **~27 KB** behavioral system prompt | The 3 lines that actually matter (working dir, platform, OS) + 1 directive → **~280 chars** |
-| 🧰 **43** tool definitions (**~70 KB**) | Only the tools *you've* allowed |
+| 🧰 The **full tool set** (**~90 KB**, dozens of tools) | Only the tools *you've* allowed |
 | 🔔 `<system-reminder>` blocks, re-injected every turn | Gone — and kept out of history too, so the prompt cache stays warm |
 | 💸 A separate **Opus** call to title the chat + another to "recap" | Answered locally, instantly, for **0 tokens** |
 
@@ -58,18 +58,33 @@ Clawback removes a fixed slab of overhead from **every** turn:
 
 | Trimmed each turn | tokens: before → after |
 | --- | --- |
-| Behavioral system prompt | ~6,700 → ~70 |
-| Tool definitions (43 tools → your lean set) | ~17,000 → ~4,000 |
+| Behavioral system prompt | ~6,750 → ~105 |
+| Tool definitions (full set → your lean allowlist) | ~23,000 → ~4,900 |
 | Re-injected `<system-reminder>` blocks | ~300 → 0 |
-| **Fixed overhead removed** | **≈ 20,000 tokens / turn** |
+| **Fixed overhead removed** | **≈ 25,000 tokens / turn** |
 
-That's **~50–75% of a short request**, easing to **~10–15% deep into a long session** (where your own history is most of the payload). On top of that, the title and recap **Opus** side-calls are eliminated outright.
+That's **~50–75% of a short request**, easing to a few percent deep into a long session (where your own history is most of the payload). On top of that, the title and recap **Opus** side-calls are eliminated outright.
 
 > 💵 **On cost, honestly:** most of that overhead is *cached* (cache reads bill at ~10%), so the dollar savings are smaller than the raw token count suggests — the real money is the killed Opus calls and the cache-busting we prevent. On a Pro/Max plan it mostly buys you **more headroom before you hit your rate limit.**
 
+### 🧾 A real receipt
+
+One actual turn, pulled straight from the logs — a fresh session, a single user message:
+
+| | Before *(reconstructed)* | After *(measured)* |
+| --- | --- | --- |
+| System prompt | ~27 KB (~6,750 tok) | **420 chars (~105 tok)** |
+| Tool definitions | ~33 tools (~23,000 tok) | **10 tools (~4,900 tok)** |
+| Reminders | present | **0** |
+| **Total request** | **~33,600 tokens** | **8,216 tokens** |
+
+A **~75% smaller request — about 4× lighter** — and the model sees only what the task needs. The *after* total (8,216) is the **exact** figure Anthropic billed; the *before* adds back the **measured** sizes of what Clawback removed.
+
+> And at the other extreme — in these same logs, long sessions reached **999,309** input tokens, a hair under the 1,000,000 cap. Un-trimmed, that turn would have blown past it and failed with `prompt is too long` (those 400s are in the logs, from before the proxy). Sometimes the ~25K Clawback shaves is the difference between *fits* and *fails*.
+
 ### Focus — the haystack, quantified
 
-Caching makes the clutter cheap, but the model still has to read past it. Clawback removes **~20K distractor tokens per turn** — exactly the kind of reduction the research says matters:
+Caching makes the clutter cheap, but the model still has to read past it. Clawback removes **~25K distractor tokens per turn** — exactly the kind of reduction the research says matters:
 
 - 📉 **Lost in the Middle** (Liu et al., TACL 2024): accuracy follows a U-shape — a fact buried mid-context is recalled far less reliably than one near the edges, swinging results by **double-digit points**.
 - 📏 **RULER** (NVIDIA, 2024): a model's *effective* context is often a fraction of its advertised window — **only about half** of tested models held up at 32K tokens. Extra tokens aren't free.
@@ -80,9 +95,9 @@ We deliberately **don't** slap a "+X% smarter" sticker on it — anyone who does
 <details>
 <summary><b>How we got these numbers</b></summary>
 
-- ~4 characters per token; block sizes taken from real captured traffic in `logs/`.
-- System-prompt and tool figures are Clawback's own observed before/after (27 KB → ~280 chars; 43 tools → a lean allowlist).
-- "% of request" assumes a short turn ≈ 25–35K tokens and a long turn ≈ 150K+ (dominated by conversation history) — consistent with the cache-read sizes measured in live sessions.
+- The **"after"** numbers are real and exact: forwarded sizes are read straight from `logs/`, and the 8,216-token total is the figure the Anthropic API actually billed (`usage`) for that turn.
+- The **"before"** is reconstructed: Clawback only logs what it *forwards*, so the original isn't stored. We add back the measured sizes of what was stripped — the system-prompt delta (~27 KB observed → 420 chars) and the dropped tool definitions (the full built-in set measured at ~93 KB / ~23K tokens in the same logs; one tool, `Workflow`, is 20 KB alone). ~4 characters per token.
+- "% of request" follows from the turn's size: overhead is most of a short/fresh request and a few percent once long conversation history dominates.
 - The focus/accuracy figures are **reported by the cited papers**, describing the failure mode Clawback targets — they are *not* a measured Clawback result.
 
 </details>
