@@ -531,3 +531,10 @@ detection, copy-on-write transforms, dynamic `tools.json`,
 per-request file-and-markdown logs — is the result of iterating
 against real Claude Code traffic and observing what actually broke
 when we got it wrong.
+
+---
+
+## License
+
+Released into the public domain under [The Unlicense](LICENSE). Do whatever
+you want with it — copy, modify, sell, redistribute — no attribution required.

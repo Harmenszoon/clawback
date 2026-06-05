@@ -9,6 +9,14 @@ readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "Harmenszoon" }]
 keywords = ["claude", "anthropic", "proxy", "llm", "aiohttp"]
+license = { file = "LICENSE" }
+classifiers = [
+    "License :: OSI Approved :: The Unlicense (Unlicense)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Framework :: aiohttp",
+    "Topic :: Internet :: Proxy Servers",
+]
 dynamic = ["version"]
 dependencies = [
     "aiohttp>=3.9,<4",

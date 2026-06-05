@@ -18,6 +18,7 @@ All notable changes to this project are documented here. The format is based on
   strip-system-reminders, the thinking-order repair, and log redaction.
 - **Packaging metadata** in `pyproject.toml` and a `claude-proxy` console entry
   point; `tools.json.example` template; `requirements-dev.txt`.
+- **License:** released into the public domain under The Unlicense.
 
 ### Fixed
 - **`tool_choice` reconciliation.** `filter-tools` no longer drops a tool pinned
