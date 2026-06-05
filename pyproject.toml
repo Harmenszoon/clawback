@@ -24,7 +24,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8,<10"]
+dev = ["pytest>=8,<10", "pytest-asyncio>=0.23,<2", "ruff>=0.14.10,<0.15"]
+
+# NOTE: update the slug below if the GitHub repo isn't `Harmenszoon/claude-proxy`.
+[project.urls]
+Homepage = "https://github.com/Harmenszoon/claude-proxy"
+Source = "https://github.com/Harmenszoon/claude-proxy"
+Issues = "https://github.com/Harmenszoon/claude-proxy/issues"
+Changelog = "https://github.com/Harmenszoon/claude-proxy/blob/main/CHANGELOG.md"
 
 [project.scripts]
 claude-proxy = "claude_proxy.__main__:_run"
@@ -35,8 +42,23 @@ packages = ["claude_proxy"]
 [tool.setuptools.dynamic]
 version = { attr = "claude_proxy.__version__" }
 
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+# A pragmatic-but-meaningful set: pyflakes/pycodestyle errors, import sorting,
+# modern-Python upgrades, bugbear, comprehensions, and simplifications.
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests favor readability over some lint niceties.
+"tests/*" = ["E501"]
+
 [tool.pytest.ini_options]
 # Put the project root on sys.path so `import claude_proxy` works without an
 # install step, and keep test collection scoped to tests/.
 pythonpath = ["."]
 testpaths = ["tests"]
+# Async tests (server integration) use pytest-asyncio in auto mode.
+asyncio_mode = "auto"

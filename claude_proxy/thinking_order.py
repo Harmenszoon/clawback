@@ -109,8 +109,10 @@ def _block_identity(block: Any) -> Identity | None:
         try:
             canon_input = json.dumps(
                 block.get("input", {}),
-                sort_keys=True, separators=(",", ":"),
-                ensure_ascii=False, allow_nan=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
             )
         except (TypeError, ValueError):
             return None  # non-serializable input — don't reorder around it
@@ -159,7 +161,7 @@ class ThinkingOrderCache:
     def __init__(self, max_entries: int = _DEFAULT_MAX_ENTRIES) -> None:
         self._max = max_entries
         # (session_id, thinking_key) -> canonical identity sequence
-        self._store: "OrderedDict[tuple, list[Identity]]" = OrderedDict()
+        self._store: OrderedDict[tuple, list[Identity]] = OrderedDict()
 
     # ------------------------------------------------------------------ record
 
@@ -249,7 +251,7 @@ class ThinkingOrderCache:
         if identities == canonical:
             return None  # already in canonical order — nothing to do
 
-        by_identity = {ident: block for ident, block in zip(identities, content)}
+        by_identity = dict(zip(identities, content, strict=True))
         new_content = [by_identity[ident] for ident in canonical]
 
         new_msg = dict(msg)

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -36,10 +36,10 @@ class RunLogger:
     # ------------------------------------------------------------------ API
 
     @classmethod
-    def create(cls) -> "RunLogger":
+    def create(cls) -> RunLogger:
         """Create a fresh run directory tagged with the current UTC timestamp."""
         LOGS_ROOT.mkdir(parents=True, exist_ok=True)
-        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
+        ts = datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%S")
         run_dir = LOGS_ROOT / ts
         # Disambiguate if the same second is hit on restart.
         suffix = 1
@@ -100,13 +100,19 @@ class RunLogger:
 
         md_path = record_path.with_suffix(".md")
         await asyncio.to_thread(
-            _write_record, record_path, record, md_path, self.index_path, index_entry,
+            _write_record,
+            record_path,
+            record,
+            md_path,
+            self.index_path,
+            index_entry,
         )
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _slugify_path(path: str) -> str:
     """Turn a request path into a safe filename fragment.
@@ -123,10 +129,7 @@ def _slugify_path(path: str) -> str:
 
 def _sanitize_headers(headers: dict[str, str]) -> dict[str, str]:
     """Replace sensitive header values with a redaction marker."""
-    return {
-        k: ("<redacted>" if k.lower() in SENSITIVE_HEADERS else v)
-        for k, v in headers.items()
-    }
+    return {k: ("<redacted>" if k.lower() in SENSITIVE_HEADERS else v) for k, v in headers.items()}
 
 
 def _sanitize_request_body(body: Any) -> Any:

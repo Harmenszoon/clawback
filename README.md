@@ -1,5 +1,9 @@
 # claude_proxy
 
+[![CI](https://github.com/Harmenszoon/claude-proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/Harmenszoon/claude-proxy/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
+[![License: Unlicense](https://img.shields.io/badge/license-Unlicense-blue.svg)](LICENSE)
+
 A small, sharp HTTP proxy that sits between Claude Code and the Anthropic
 API. It forwards every request upstream — and along the way applies a
 fail-open transform pipeline that removes known sources of wasted tokens,
@@ -10,6 +14,11 @@ blocks being reordered on resend — see **Repair** below).
 It also writes an exhaustive, human-readable log of every request and
 response so you can see exactly what Claude Code is doing and decide
 what else is worth trimming.
+
+> ⚠️ **Local, single-user tool.** It has no authentication, forwards your real
+> API credentials upstream, and its `logs/` directory contains your prompts,
+> file contents, and tool output in full. Bind it to `localhost` only and
+> sanitize logs before sharing. See [SECURITY.md](SECURITY.md).
 
 ---
 
@@ -376,13 +385,18 @@ claude
 
 ```bash
 pip install -r requirements-dev.txt
-python -m pytest
+python -m pytest          # tests
+ruff check .              # lint
+ruff format --check .     # formatting
 ```
 
-The suite covers the pure, highest-risk logic: tool filtering (allow/deny,
-discovery, and the `tool_choice` reconciliation), the `SSEAssembler` (error /
-unknown event capture and UTF-8 chunk-boundary handling), and
-strip-system-reminders. No network or running proxy is required.
+The suite covers the transforms (tool filtering incl. `tool_choice`
+reconciliation, reduce-main-system, the title-gen/recap short-circuits,
+strip-system-reminders), the `SSEAssembler` (error/unknown event capture and
+UTF-8 chunk boundaries), the thinking-order repair, log redaction, the
+renderer, and the async handler end-to-end against a fake upstream
+(`tests/test_server.py`). No network or running proxy is required. The same
+three commands run in CI on Linux, macOS, and Windows across Python 3.11–3.13.
 
 ---
 
@@ -415,11 +429,16 @@ claude_proxy/
   sse.py             SSE stream parser — observation-only, used for the log
   log.py             RunLogger: per-run dir, file-per-request, index.jsonl
   render.py          JSON record → human-readable markdown view
-tests/               pytest unit tests for the pure transform/parse logic
-pyproject.toml       packaging metadata, console entry point, pytest config
+tests/               pytest suite (transforms, SSE, repair, redaction,
+                     renderer, and an end-to-end async handler test)
+.github/             CI workflow + issue/PR templates
+pyproject.toml       packaging metadata, console entry point, ruff + pytest config
 requirements.txt     runtime dependencies
-requirements-dev.txt runtime + test dependencies
+requirements-dev.txt runtime + test/lint dependencies
 CHANGELOG.md         notable changes per version
+CONTRIBUTING.md      dev setup, the three CI gates, design principles
+SECURITY.md          threat model, log-sensitivity, vulnerability reporting
+LICENSE              The Unlicense (public domain)
 tools.json.example   template allowlist (checked in)
 tools.json           per-user allow/deny config (gitignored, auto-created)
 .env.example         template config (checked in)
@@ -443,12 +462,14 @@ the way it does.
   workload (one CLI, requests issued sequentially) the simpler shape is
   the right one.
 
-* **Partial test coverage.** `tests/` covers the highest-risk pure logic —
-  tool filtering (including the `tool_choice` reconciliation), the
-  `SSEAssembler` (out-of-band events and UTF-8 chunk boundaries), and
-  strip-system-reminders — but the async server handler and the stateful
-  thinking-order repair are still validated manually against real traffic.
-  Extending coverage to those is the next step.
+* **Test coverage is good but not total.** `tests/` covers the transforms
+  (tool filtering incl. `tool_choice` reconciliation, reduce-main-system, the
+  title-gen/recap short-circuits, strip-system-reminders), the `SSEAssembler`
+  (out-of-band events and UTF-8 chunk boundaries), the thinking-order repair,
+  log redaction, the renderer, and the async handler end-to-end
+  (`tests/test_server.py` drives the real pipeline against a fake upstream).
+  What's still only validated against real traffic is the long-tail of
+  upstream-shape drift — which is exactly what the logs are there to catch.
 
 * **`metadata.user_id` is forwarded but log-redacted.** Anthropic uses
   this for billing reconciliation and rate-limit attribution, so the proxy

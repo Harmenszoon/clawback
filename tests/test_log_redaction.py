@@ -45,10 +45,10 @@ def test_redaction_is_copy_on_write_does_not_mutate_forwarded_body():
     before = copy.deepcopy(body)
     out = _sanitize_request_body(body)
 
-    assert body == before                      # original untouched
-    assert out is not body                      # new top-level dict
+    assert body == before  # original untouched
+    assert out is not body  # new top-level dict
     assert out["metadata"] is not body["metadata"]  # new metadata dict
-    assert out["metadata"]["other"] == "keep"   # sibling fields survive
+    assert out["metadata"]["other"] == "keep"  # sibling fields survive
 
 
 def test_body_without_metadata_returned_unchanged():

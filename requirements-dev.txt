@@ -1,2 +1,5 @@
 -r requirements.txt
 pytest>=8,<10
+pytest-asyncio>=0.23,<2
+# Pinned to a minor range so a new ruff release can't add rules that turn CI red.
+ruff>=0.14.10,<0.15

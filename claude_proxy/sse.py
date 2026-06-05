@@ -12,7 +12,6 @@ import codecs
 import json
 from typing import Any
 
-
 # Events outside the content/message lifecycle that carry nothing for the
 # assembled message and are safely ignored: pings are keepalives, and a
 # message_stop payload is empty (the stop_reason arrives on message_delta).
@@ -103,11 +102,11 @@ class SSEAssembler:
             return
         etype = data.get("type", "")
         dispatch = {
-            "message_start":       self._on_message_start,
+            "message_start": self._on_message_start,
             "content_block_start": self._on_block_start,
             "content_block_delta": self._on_block_delta,
-            "content_block_stop":  self._on_block_stop,
-            "message_delta":       self._on_message_delta,
+            "content_block_stop": self._on_block_stop,
+            "message_delta": self._on_message_delta,
         }
         handler = dispatch.get(etype)
         if handler:

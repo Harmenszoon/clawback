@@ -78,10 +78,10 @@ from typing import Any
 
 from .tool_filter import filter_tools
 
-
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
+
 
 def maybe_shortcut(body: Any) -> tuple[dict, str] | None:
     """Return (synthetic_response_dict, reason) if the request should be
@@ -103,6 +103,7 @@ def maybe_shortcut(body: Any) -> tuple[dict, str] | None:
 # ---------------------------------------------------------------------------
 # Detection
 # ---------------------------------------------------------------------------
+
 
 def _is_title_gen(body: dict) -> bool:
     """True iff the request is asking for a JSON title back.
@@ -149,6 +150,7 @@ def _is_recap_request(body: dict) -> bool:
 # ---------------------------------------------------------------------------
 # Synthesis
 # ---------------------------------------------------------------------------
+
 
 def _synthesize_title_response(body: dict) -> dict:
     """Build a non-streaming response containing `{"title": "CONVERSATION_<hex>"}`."""
@@ -201,6 +203,7 @@ def _synthesize_recap_response(body: dict) -> dict:
 # SSE serialization
 # ---------------------------------------------------------------------------
 
+
 def to_sse_bytes(response: dict) -> bytes:
     """Serialize a response dict as Anthropic-style SSE event bytes.
 
@@ -210,48 +213,73 @@ def to_sse_bytes(response: dict) -> bytes:
     """
     parts: list[bytes] = []
 
-    parts.append(_event("message_start", {
-        "type": "message_start",
-        "message": {
-            "id": response["id"],
-            "type": response["type"],
-            "role": response["role"],
-            "model": response["model"],
-            "content": [],
-            "stop_reason": None,
-            "stop_sequence": None,
-            "usage": {
-                k: v for k, v in response.get("usage", {}).items()
-                if k != "output_tokens"
+    parts.append(
+        _event(
+            "message_start",
+            {
+                "type": "message_start",
+                "message": {
+                    "id": response["id"],
+                    "type": response["type"],
+                    "role": response["role"],
+                    "model": response["model"],
+                    "content": [],
+                    "stop_reason": None,
+                    "stop_sequence": None,
+                    "usage": {k: v for k, v in response.get("usage", {}).items() if k != "output_tokens"},
+                },
             },
-        },
-    }))
+        )
+    )
 
     for idx, block in enumerate(response.get("content", [])):
         if block.get("type") != "text":
             continue
         text = block.get("text", "")
-        parts.append(_event("content_block_start", {
-            "type": "content_block_start", "index": idx,
-            "content_block": {"type": "text", "text": ""},
-        }))
+        parts.append(
+            _event(
+                "content_block_start",
+                {
+                    "type": "content_block_start",
+                    "index": idx,
+                    "content_block": {"type": "text", "text": ""},
+                },
+            )
+        )
         if text:
-            parts.append(_event("content_block_delta", {
-                "type": "content_block_delta", "index": idx,
-                "delta": {"type": "text_delta", "text": text},
-            }))
-        parts.append(_event("content_block_stop", {
-            "type": "content_block_stop", "index": idx,
-        }))
+            parts.append(
+                _event(
+                    "content_block_delta",
+                    {
+                        "type": "content_block_delta",
+                        "index": idx,
+                        "delta": {"type": "text_delta", "text": text},
+                    },
+                )
+            )
+        parts.append(
+            _event(
+                "content_block_stop",
+                {
+                    "type": "content_block_stop",
+                    "index": idx,
+                },
+            )
+        )
 
-    parts.append(_event("message_delta", {
-        "type": "message_delta",
-        "delta": {
-            "stop_reason": response.get("stop_reason"),
-            "stop_sequence": response.get("stop_sequence"),
-        },
-        "usage": {"output_tokens": response.get("usage", {}).get("output_tokens", 0)},
-    }))
+    parts.append(
+        _event(
+            "message_delta",
+            {
+                "type": "message_delta",
+                "delta": {
+                    "stop_reason": response.get("stop_reason"),
+                    "stop_sequence": response.get("stop_sequence"),
+                },
+                "usage": {"output_tokens": response.get("usage", {}).get("output_tokens", 0)},
+            },
+        )
+    )
 
     parts.append(_event("message_stop", {"type": "message_stop"}))
     parts.append(b"data: [DONE]\n\n")
@@ -260,12 +288,13 @@ def to_sse_bytes(response: dict) -> bytes:
 
 def _event(name: str, data: dict) -> bytes:
     payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
-    return f"event: {name}\ndata: {payload}\n\n".encode("utf-8")
+    return f"event: {name}\ndata: {payload}\n\n".encode()
 
 
 # ---------------------------------------------------------------------------
 # Request-mutation transforms
 # ---------------------------------------------------------------------------
+
 
 def apply_request_transforms(body: Any) -> tuple[Any, list[str]]:
     """Apply mutations to a request body.
@@ -304,9 +333,7 @@ def apply_request_transforms(body: Any) -> tuple[Any, list[str]]:
         for t in (tools_list if isinstance(tools_list, list) else [])
         if isinstance(t, dict) and isinstance(t.get("name"), str)
     }
-    stripped = _strip_system_reminders(
-        body, enabled_tool_names, tools_known=isinstance(tools_list, list)
-    )
+    stripped = _strip_system_reminders(body, enabled_tool_names, tools_known=isinstance(tools_list, list))
     if stripped is not None:
         body = stripped
         applied.append("strip-system-reminders")
@@ -317,12 +344,9 @@ def apply_request_transforms(body: Any) -> tuple[Any, list[str]]:
 # Fields we keep from the env section of the main system prompt.
 # Order here determines order in the rewritten block.
 _KEEP_FIELDS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("Primary working directory",
-     re.compile(r"Primary working directory:\s*(.+?)\s*$", re.MULTILINE)),
-    ("Platform",
-     re.compile(r"Platform:\s*(.+?)\s*$", re.MULTILINE)),
-    ("OS Version",
-     re.compile(r"OS Version:\s*(.+?)\s*$", re.MULTILINE)),
+    ("Primary working directory", re.compile(r"Primary working directory:\s*(.+?)\s*$", re.MULTILINE)),
+    ("Platform", re.compile(r"Platform:\s*(.+?)\s*$", re.MULTILINE)),
+    ("OS Version", re.compile(r"OS Version:\s*(.+?)\s*$", re.MULTILINE)),
 )
 
 # Env-section landmarks Anthropic has used historically. Either format
@@ -519,11 +543,7 @@ def _clean_inline_reminders(block: Any) -> dict | None:
             new_inner: list = []
             inner_changed = False
             for sub in inner:
-                if (
-                    isinstance(sub, dict)
-                    and sub.get("type") == "text"
-                    and "<system-reminder>" in sub.get("text", "")
-                ):
+                if isinstance(sub, dict) and sub.get("type") == "text" and "<system-reminder>" in sub.get("text", ""):
                     cleaned = _INLINE_REMINDER_RE.sub("", sub["text"])
                     if cleaned != sub["text"]:
                         new_sub = dict(sub)
@@ -577,9 +597,7 @@ def _strip_system_reminders(
         # to only the parts whose tools are still enabled (see _trim_inline_
         # system_message). None means "nothing worth keeping" → drop it whole.
         if isinstance(msg, dict) and msg.get("role") == "system":
-            trimmed = _trim_inline_system_message(
-                msg.get("content"), enabled_tool_names, tools_known
-            )
+            trimmed = _trim_inline_system_message(msg.get("content"), enabled_tool_names, tools_known)
             if trimmed is None:
                 changed = True
                 continue  # drop the whole message
@@ -654,9 +672,7 @@ _SKILLS_CATALOG_MARKER = "are available for use with the Skill tool"
 _MCP_TOOL_NAME_RE = re.compile(r"^mcp__(.+?)__.+$")
 
 
-def _trim_inline_system_message(
-    content: Any, enabled_tool_names: set[str], tools_known: bool
-) -> Any | None:
+def _trim_inline_system_message(content: Any, enabled_tool_names: set[str], tools_known: bool) -> Any | None:
     """Return the trimmed content for an inline `role:"system"` message, the
     original content unchanged if nothing is recognized, or None to drop it.
 
@@ -685,9 +701,7 @@ def _trim_inline_system_message(
     return content
 
 
-def _trim_mcp_and_skills_block(
-    text: str, enabled_tool_names: set[str], tools_known: bool
-) -> str | None:
+def _trim_mcp_and_skills_block(text: str, enabled_tool_names: set[str], tools_known: bool) -> str | None:
     """Split an injected block into its MCP-instructions portion and its skills
     catalog, keep each only while its backing tool is enabled, and recombine.
 
@@ -696,11 +710,7 @@ def _trim_mcp_and_skills_block(
     everything — we only drop when we can positively confirm a tool is gone.
     """
     skill_enabled = (not tools_known) or ("Skill" in enabled_tool_names)
-    enabled_servers = {
-        m.group(1)
-        for name in enabled_tool_names
-        if (m := _MCP_TOOL_NAME_RE.match(name))
-    }
+    enabled_servers = {m.group(1) for name in enabled_tool_names if (m := _MCP_TOOL_NAME_RE.match(name))}
 
     mcp_part, skills_part = _split_off_skills_catalog(text)
 
@@ -732,9 +742,7 @@ def _split_off_skills_catalog(text: str) -> tuple[str, str]:
     return text, ""
 
 
-def _trim_mcp_servers(
-    mcp_text: str, enabled_servers: set[str], tools_known: bool
-) -> str | None:
+def _trim_mcp_servers(mcp_text: str, enabled_servers: set[str], tools_known: bool) -> str | None:
     """Keep only the `## <server>` subsections whose server still has an enabled
     tool. Returns the trimmed block, or None if no subsection survives.
 

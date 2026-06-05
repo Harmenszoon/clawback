@@ -5,10 +5,10 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-
 # ---------------------------------------------------------------------------
 # .env loading
 # ---------------------------------------------------------------------------
+
 
 def _load_env_file() -> None:
     """Populate os.environ from a project-root .env file, if present.
@@ -66,29 +66,45 @@ LOGS_ROOT: Path = PROJECT_ROOT / "logs"
 # itself, or because they describe a hop-by-hop concern that does not survive
 # proxying.
 
-REQUEST_STRIP_HEADERS: frozenset[str] = frozenset({
-    "host",
-    "content-length",      # aiohttp recomputes
-    "transfer-encoding",   # aiohttp manages framing
-    "connection", "keep-alive", "proxy-authenticate",
-    "proxy-authorization", "te", "trailers", "upgrade",
-})
+REQUEST_STRIP_HEADERS: frozenset[str] = frozenset(
+    {
+        "host",
+        "content-length",  # aiohttp recomputes
+        "transfer-encoding",  # aiohttp manages framing
+        "connection",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailers",
+        "upgrade",
+    }
+)
 
-RESPONSE_STRIP_HEADERS: frozenset[str] = frozenset({
-    "content-length",      # chunked framing in use
-    "content-encoding",    # aiohttp auto-decompresses upstream
-    "transfer-encoding",
-    "connection", "keep-alive", "proxy-authenticate",
-    "proxy-authorization", "te", "trailers", "upgrade",
-})
+RESPONSE_STRIP_HEADERS: frozenset[str] = frozenset(
+    {
+        "content-length",  # chunked framing in use
+        "content-encoding",  # aiohttp auto-decompresses upstream
+        "transfer-encoding",
+        "connection",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailers",
+        "upgrade",
+    }
+)
 
 # Header values redacted before logging. The proxy still forwards the real
 # value upstream; only the log entry is sanitized.
-SENSITIVE_HEADERS: frozenset[str] = frozenset({
-    "authorization",
-    "x-api-key",
-    "cookie",
-    "set-cookie",
-    "proxy-authorization",
-    "x-claude-code-session-id",
-})
+SENSITIVE_HEADERS: frozenset[str] = frozenset(
+    {
+        "authorization",
+        "x-api-key",
+        "cookie",
+        "set-cookie",
+        "proxy-authorization",
+        "x-claude-code-session-id",
+    }
+)

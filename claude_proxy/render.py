@@ -17,7 +17,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-
 # Long string content goes inside fences of this length so nested triple
 # backticks in tool / prompt text do not terminate the fence early.
 _FENCE = "````"
@@ -26,6 +25,7 @@ _FENCE = "````"
 # ---------------------------------------------------------------------------
 # Top-level renderer
 # ---------------------------------------------------------------------------
+
 
 def render(record: dict) -> str:
     """Return a markdown rendering of a single request/response record."""
@@ -42,6 +42,7 @@ def render(record: dict) -> str:
 # ---------------------------------------------------------------------------
 # Sections
 # ---------------------------------------------------------------------------
+
 
 def _render_header(rec: dict) -> str:
     seq = rec.get("seq", "?")
@@ -221,6 +222,7 @@ def _render_response(rec: dict) -> str:
 # Block / tool / param formatting
 # ---------------------------------------------------------------------------
 
+
 def _fmt_text_block(block: dict, position: str) -> str:
     if not isinstance(block, dict):
         return _fenced(str(block))
@@ -251,17 +253,11 @@ def _fmt_message_block(idx: int, block: Any) -> str:
         if "<system-reminder>" in text:
             flags.append("**contains `<system-reminder>`**")
         flag_str = (" · " + " · ".join(flags)) if flags else ""
-        return (
-            f"#### Block {idx} — type: `text`, {len(text):,} chars, cache: {cache}{flag_str}\n\n"
-            + _fenced(text)
-        )
+        return f"#### Block {idx} — type: `text`, {len(text):,} chars, cache: {cache}{flag_str}\n\n" + _fenced(text)
 
     if btype == "thinking":
         thinking = block.get("thinking", "")
-        return (
-            f"#### Block {idx} — type: `thinking`, {len(thinking):,} chars\n\n"
-            + _fenced(thinking)
-        )
+        return f"#### Block {idx} — type: `thinking`, {len(thinking):,} chars\n\n" + _fenced(thinking)
 
     if btype == "tool_use":
         name = block.get("name", "?")
@@ -275,9 +271,8 @@ def _fmt_message_block(idx: int, block: Any) -> str:
         tool_use_id = block.get("tool_use_id", "?")
         is_err = block.get("is_error")
         content = block.get("content")
-        header = (
-            f"#### Block {idx} — type: `tool_result`, tool_use_id: `{tool_use_id}`"
-            + (" *(error)*" if is_err else "")
+        header = f"#### Block {idx} — type: `tool_result`, tool_use_id: `{tool_use_id}`" + (
+            " *(error)*" if is_err else ""
         )
         if isinstance(content, str):
             return header + "\n\n" + _fenced(content)
@@ -335,6 +330,7 @@ def _fmt_param(name: str, schema: dict, required: bool) -> str:
 # ---------------------------------------------------------------------------
 # Small helpers
 # ---------------------------------------------------------------------------
+
 
 def _fmt_headers(headers: dict) -> str:
     if not headers:
@@ -407,6 +403,7 @@ def _fenced(text: str) -> str:
 # ---------------------------------------------------------------------------
 # CLI entry: `python -m claude_proxy.render <path>`
 # ---------------------------------------------------------------------------
+
 
 def _render_file(json_path: Path) -> Path:
     record = json.loads(json_path.read_text(encoding="utf-8"))

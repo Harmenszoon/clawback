@@ -24,11 +24,12 @@ visible.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import ssl
 import sys
 import traceback
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlparse
 
@@ -48,10 +49,10 @@ from .sse import SSEAssembler
 from .thinking_order import ThinkingOrderCache
 from .transforms import apply_request_transforms, maybe_shortcut, to_sse_bytes
 
-
 # ---------------------------------------------------------------------------
 # SSL
 # ---------------------------------------------------------------------------
+
 
 def _make_ssl_context() -> ssl.SSLContext:
     """Return an SSL context backed by certifi's CA bundle."""
@@ -61,6 +62,7 @@ def _make_ssl_context() -> ssl.SSLContext:
 # ---------------------------------------------------------------------------
 # Handler
 # ---------------------------------------------------------------------------
+
 
 class ProxyHandler:
     """aiohttp request handler that mirrors traffic to the upstream API."""
@@ -115,19 +117,18 @@ class ProxyHandler:
             response = web.StreamResponse(status=200, headers=sent_headers)
             response.enable_chunked_encoding()
             await response.prepare(request)
-            try:
+            with contextlib.suppress(ConnectionError, aiohttp.ClientConnectionError):
                 await response.write(to_sse_bytes(synth_body))
-            except (ConnectionError, aiohttp.ClientConnectionError):
-                pass
         else:
             # web.json_response sets Content-Type itself. Read it back from the
             # constructed response so the log reflects exactly what was sent.
             response = web.json_response(
-                synth_body, headers={"X-Proxy-Synthesized": reason},
+                synth_body,
+                headers={"X-Proxy-Synthesized": reason},
             )
             sent_headers = dict(response.headers)
 
-        elapsed = (datetime.now(timezone.utc) - started_at).total_seconds()
+        elapsed = (datetime.now(UTC) - started_at).total_seconds()
         print(
             f"[{started_at.strftime('%H:%M:%S')}] {request.method} {path_with_query} "
             f"-> 200 (short-circuited: {reason}, {elapsed:.3f}s)",
@@ -150,7 +151,7 @@ class ProxyHandler:
 
     async def forward(self, request: web.Request) -> web.StreamResponse:
         """Forward one client request upstream and stream the reply back."""
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         assert self.session is not None
 
         req_body_bytes = await request.read()
@@ -167,15 +168,18 @@ class ProxyHandler:
             shortcut = maybe_shortcut(req_body_parsed)
         except Exception as exc:
             print(
-                f"  WARNING: maybe_shortcut failed ({type(exc).__name__}: {exc}); "
-                "forwarding upstream",
+                f"  WARNING: maybe_shortcut failed ({type(exc).__name__}: {exc}); forwarding upstream",
                 flush=True,
             )
             shortcut = None
 
         if shortcut is not None:
             return await self._serve_shortcut(
-                request, started_at, path_with_query, req_body_parsed, shortcut,
+                request,
+                started_at,
+                path_with_query,
+                req_body_parsed,
+                shortcut,
             )
 
         # Apply request mutations. If anything ran, we re-serialize so the
@@ -185,8 +189,7 @@ class ProxyHandler:
             forwarded_body, transforms_applied = apply_request_transforms(req_body_parsed)
         except Exception as exc:
             print(
-                f"  WARNING: apply_request_transforms failed ({type(exc).__name__}: {exc}); "
-                "forwarding original body",
+                f"  WARNING: apply_request_transforms failed ({type(exc).__name__}: {exc}); forwarding original body",
                 flush=True,
             )
             forwarded_body, transforms_applied = req_body_parsed, []
@@ -196,12 +199,12 @@ class ProxyHandler:
         # fail-open: any error or cache miss leaves the body as-is.
         try:
             forwarded_body, repaired = self.thinking_cache.repair_request(
-                session_id, forwarded_body,
+                session_id,
+                forwarded_body,
             )
         except Exception as exc:
             print(
-                f"  WARNING: thinking-order repair failed ({type(exc).__name__}: {exc}); "
-                "forwarding as-is",
+                f"  WARNING: thinking-order repair failed ({type(exc).__name__}: {exc}); forwarding as-is",
                 flush=True,
             )
             repaired = 0
@@ -211,7 +214,9 @@ class ProxyHandler:
         if transforms_applied:
             req_body_parsed = forwarded_body
             req_body_bytes = json.dumps(
-                forwarded_body, ensure_ascii=False, separators=(",", ":"),
+                forwarded_body,
+                ensure_ascii=False,
+                separators=(",", ":"),
             ).encode("utf-8")
 
         try:
@@ -240,7 +245,7 @@ class ProxyHandler:
                         flush=True,
                     )
 
-                elapsed = (datetime.now(timezone.utc) - started_at).total_seconds()
+                elapsed = (datetime.now(UTC) - started_at).total_seconds()
 
                 _log_console(started_at, request.method, path_with_query, upstream.status, total_bytes, elapsed)
 
@@ -260,7 +265,7 @@ class ProxyHandler:
                 return response
 
         except Exception as exc:
-            elapsed = (datetime.now(timezone.utc) - started_at).total_seconds()
+            elapsed = (datetime.now(UTC) - started_at).total_seconds()
             err = f"{type(exc).__name__}: {exc}"
             traceback.print_exc()
             self._record(
@@ -276,7 +281,10 @@ class ProxyHandler:
                 error=err,
                 transforms_applied=transforms_applied,
             )
-            print(f"[{started_at.strftime('%H:%M:%S')}] ERROR {request.method} {path_with_query} -> {err} ({elapsed:.1f}s)")
+            print(
+                f"[{started_at.strftime('%H:%M:%S')}] ERROR {request.method} "
+                f"{path_with_query} -> {err} ({elapsed:.1f}s)"
+            )
             # Mirror Anthropic's error envelope so callers can parse the failure
             # without a special case for proxy-shaped responses.
             return web.json_response(
@@ -288,6 +296,7 @@ class ProxyHandler:
 # ---------------------------------------------------------------------------
 # Streaming / buffering helpers
 # ---------------------------------------------------------------------------
+
 
 async def _stream_sse(
     request: web.Request,
@@ -336,6 +345,7 @@ async def _buffer_response(
 # Background logging
 # ---------------------------------------------------------------------------
 
+
 async def _safe_log(logger: RunLogger, fields: dict[str, Any]) -> None:
     """Write a log record and swallow any failure.
 
@@ -357,6 +367,7 @@ async def _safe_log(logger: RunLogger, fields: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 # Header / body utilities
 # ---------------------------------------------------------------------------
+
 
 def _build_forward_headers(request: web.Request) -> dict[str, str]:
     """Copy client headers, drop hop-by-hop entries, and set Host upstream."""
@@ -386,8 +397,7 @@ def _decode_or_repr(raw: bytes) -> str:
 
 def _log_console(started_at: datetime, method: str, path: str, status: int, total_bytes: int, elapsed: float) -> None:
     print(
-        f"[{started_at.strftime('%H:%M:%S')}] {method} {path} "
-        f"-> {status} ({total_bytes:,} bytes, {elapsed:.1f}s)",
+        f"[{started_at.strftime('%H:%M:%S')}] {method} {path} -> {status} ({total_bytes:,} bytes, {elapsed:.1f}s)",
         flush=True,
     )
 
@@ -395,6 +405,7 @@ def _log_console(started_at: datetime, method: str, path: str, status: int, tota
 # ---------------------------------------------------------------------------
 # Entrypoint
 # ---------------------------------------------------------------------------
+
 
 async def health_check(_request: web.Request) -> web.Response:
     return web.Response(text="OK")

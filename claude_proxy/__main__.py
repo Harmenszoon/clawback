@@ -7,6 +7,7 @@ so crashes and prints are captured alongside the per-request JSON files.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import sys
 import traceback
 
@@ -22,18 +23,14 @@ class _Tee:
         self._file = file
 
     def write(self, data):
-        try:
+        with contextlib.suppress(Exception):
             self._file.write(data)
             self._file.flush()
-        except Exception:
-            pass
         return self._stream.write(data)
 
     def flush(self) -> None:
-        try:
+        with contextlib.suppress(Exception):
             self._file.flush()
-        except Exception:
-            pass
         self._stream.flush()
 
     def __getattr__(self, name):
@@ -43,7 +40,9 @@ class _Tee:
 def _run() -> None:
     logger = RunLogger.create()
     console_path = logger.run_dir / "console.log"
-    log_file = open(console_path, "w", encoding="utf-8", buffering=1)
+    # Long-lived handle: the tee writes to it for the whole process lifetime and
+    # it is closed in the finally block below, so a context manager doesn't fit.
+    log_file = open(console_path, "w", encoding="utf-8", buffering=1)  # noqa: SIM115
 
     sys.stdout = _Tee(sys.__stdout__, log_file)
     sys.stderr = _Tee(sys.__stderr__, log_file)

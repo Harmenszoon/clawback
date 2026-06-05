@@ -140,9 +140,7 @@ def filter_tools(body: dict) -> tuple[dict, list[str], list[str]] | None:
     # above, so the only way it's absent is that the client itself named a tool
     # it never sent; forwarding the original (rather than our filtered body) at
     # least keeps the proxy out of the failure.
-    forced_absent = forced is not None and not any(
-        isinstance(t, dict) and t.get("name") == forced for t in kept
-    )
+    forced_absent = forced is not None and not any(isinstance(t, dict) and t.get("name") == forced for t in kept)
     if _requires_tool_use(body) and (not kept or forced_absent):
         requirement = f"tool {forced!r}" if forced else "a tool"
         print(
@@ -194,6 +192,7 @@ def _requires_tool_use(body: dict) -> bool:
 # ---------------------------------------------------------------------------
 # File I/O
 # ---------------------------------------------------------------------------
+
 
 def _load() -> tuple[dict[str, bool], set[str], bool]:
     """Read tools.json.
@@ -257,7 +256,7 @@ def _load() -> tuple[dict[str, bool], set[str], bool]:
             invalid_names.add(name)
             print(
                 f"  WARN: tools.json: entry {name!r} has invalid value {value!r} "
-                "(expected true, false, or {\"allow\": true|false}); treating "
+                '(expected true, false, or {"allow": true|false}); treating '
                 "tool as denied and refusing to persist until fixed",
                 flush=True,
             )

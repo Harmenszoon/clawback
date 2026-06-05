@@ -19,6 +19,13 @@ All notable changes to this project are documented here. The format is based on
 - **Packaging metadata** in `pyproject.toml` and a `claude-proxy` console entry
   point; `tools.json.example` template; `requirements-dev.txt`.
 - **License:** released into the public domain under The Unlicense.
+- **Project infrastructure for public release:** GitHub Actions CI (ruff lint +
+  format check, pytest on Linux/macOS/Windows × Python 3.11–3.13), ruff config,
+  `CONTRIBUTING.md`, `SECURITY.md`, issue/PR templates, and `.gitattributes`
+  line-ending normalization.
+- **Expanded test suite** (now covering reduce-main-system, the title-gen/recap
+  short-circuits, the renderer, and an end-to-end async handler test against a
+  fake upstream).
 
 ### Fixed
 - **`tool_choice` reconciliation.** `filter-tools` no longer drops a tool pinned
