@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "claude-proxy"
+description = "A fail-open HTTP proxy between Claude Code and the Anthropic API that trims token waste, repairs a client reordering bug, and logs every request."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Harmenszoon" }]
+keywords = ["claude", "anthropic", "proxy", "llm", "aiohttp"]
+dynamic = ["version"]
+dependencies = [
+    "aiohttp>=3.9,<4",
+    "certifi>=2023.7.22",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10"]
+
+[project.scripts]
+claude-proxy = "claude_proxy.__main__:_run"
+
+[tool.setuptools]
+packages = ["claude_proxy"]
+
+[tool.setuptools.dynamic]
+version = { attr = "claude_proxy.__version__" }
+
+[tool.pytest.ini_options]
+# Put the project root on sys.path so `import claude_proxy` works without an
+# install step, and keep test collection scoped to tests/.
+pythonpath = ["."]
+testpaths = ["tests"]

@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Local secrets
+.env
+
+# Per-user tool allowlist (auto-created at runtime; see tools.json.example).
+# Holds the operator's own MCP servers and OS-specific choices.
+tools.json
+# Atomic-write temp file from tool_filter
+tools.json.tmp
+
+# Release/build artifacts
+*.zip
+
+# Runtime artifacts (regenerated per proxy run)
+logs/
+
+# Build / packaging
+build/
+dist/
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Tool caches
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Claude Code workspace metadata
+.claude/
