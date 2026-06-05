@@ -1,16 +1,6 @@
 <div align="center">
 
-<pre>
-      \         \         \
-       \         \         \
-   ____ _                _                _    
-  / ___| | __ ___      _| |__   __ _  ___| | __
- | |   | |/ _` \ \ /\ / / '_ \ / _` |/ __| |/ /
- | |___| | (_| |\ V  V /| |_) | (_| | (__|   &lt; 
-  \____|_|\__,_| \_/\_/ |_.__/ \__,_|\___|_|\_\
-</pre>
-
-### Fewer tokens. Better code.
+<img src="assets/clawback-banner.png" alt="Clawback — Fewer tokens. Better code." width="640">
 
 **Clawback is a localhost proxy for Claude Code that strips the wasted boilerplate out of every request before it reaches Anthropic — so your tokens go to your work, and the model keeps its attention on your task instead of its own instruction manual.**
 
@@ -225,6 +215,7 @@ clawback/
   config.py          env loading, paths, header filters
 tests/               pytest suite (transforms, SSE, repair, redaction, async handler)
 .github/             CI + issue/PR templates
+assets/              logo / banner images
 ```
 
 ## Development
