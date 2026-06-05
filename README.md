@@ -48,6 +48,47 @@ Title generation and recap are full **Opus** inference calls — Clawback answer
 ### 🧠 The model gets sharper
 This is the part caching **can't** fix. A cached token is still a token sitting in the context window, still competing for the model's attention. Caching makes the clutter *cheap*; it doesn't make it *invisible*. Clawback is the only lever that shrinks the haystack — so the needle (your task) is easier to find. *Less haystack, more needle.*
 
+## 📊 How much does this actually save?
+
+Rough but honest estimates, derived from real captured traffic with the math shown. Mileage varies with conversation length and which tools you keep.
+
+### Tokens
+
+Clawback removes a fixed slab of overhead from **every** turn:
+
+| Trimmed each turn | tokens: before → after |
+| --- | --- |
+| Behavioral system prompt | ~6,700 → ~70 |
+| Tool definitions (43 tools → your lean set) | ~17,000 → ~4,000 |
+| Re-injected `<system-reminder>` blocks | ~300 → 0 |
+| **Fixed overhead removed** | **≈ 20,000 tokens / turn** |
+
+That's **~50–75% of a short request**, easing to **~10–15% deep into a long session** (where your own history is most of the payload). On top of that, the title and recap **Opus** side-calls are eliminated outright.
+
+> 💵 **On cost, honestly:** most of that overhead is *cached* (cache reads bill at ~10%), so the dollar savings are smaller than the raw token count suggests — the real money is the killed Opus calls and the cache-busting we prevent. On a Pro/Max plan it mostly buys you **more headroom before you hit your rate limit.**
+
+### Focus — the haystack, quantified
+
+Caching makes the clutter cheap, but the model still has to read past it. Clawback removes **~20K distractor tokens per turn** — exactly the kind of reduction the research says matters:
+
+- 📉 **Lost in the Middle** (Liu et al., TACL 2024): accuracy follows a U-shape — a fact buried mid-context is recalled far less reliably than one near the edges, swinging results by **double-digit points**.
+- 📏 **RULER** (NVIDIA, 2024): a model's *effective* context is often a fraction of its advertised window — **only about half** of tested models held up at 32K tokens. Extra tokens aren't free.
+- 🧪 **Context Rot** (Chroma, 2025 — tested on Claude 4 among others): accuracy degrades as input grows **even on simple tasks**, and distractors make it measurably worse.
+
+We deliberately **don't** slap a "+X% smarter" sticker on it — anyone who does is guessing. The precise, defensible version: the needle didn't change; we just shrank the haystack around it.
+
+<details>
+<summary><b>How we got these numbers</b></summary>
+
+- ~4 characters per token; block sizes taken from real captured traffic in `logs/`.
+- System-prompt and tool figures are Clawback's own observed before/after (27 KB → ~280 chars; 43 tools → a lean allowlist).
+- "% of request" assumes a short turn ≈ 25–35K tokens and a long turn ≈ 150K+ (dominated by conversation history) — consistent with the cache-read sizes measured in live sessions.
+- The focus/accuracy figures are **reported by the cited papers**, describing the failure mode Clawback targets — they are *not* a measured Clawback result.
+
+</details>
+
+**References:** [Lost in the Middle](https://arxiv.org/abs/2307.03172) · [RULER](https://arxiv.org/abs/2404.06654) · [Context Rot](https://research.trychroma.com/context-rot)
+
 ## 🛟 It can't break your session
 
 A proxy that mangles your traffic is worse than no proxy. So every transform is **fail-open**:

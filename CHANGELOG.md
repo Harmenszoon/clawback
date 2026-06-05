@@ -10,7 +10,8 @@ All notable changes to this project are documented here. The format is based on
 - **Renamed the project to `clawback`** (was `claude_proxy`). The import path,
   distribution name, and console command are all `clawback` now
   (`python -m clawback` / `clawback`). No behavior changed.
-- Rewrote the README as a landing page.
+- Rewrote the README as a landing page, including a quantified
+  savings/focus section with transparent methodology and cited research.
 
 ## [0.3.0] — 2026-06-05
 
