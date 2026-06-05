@@ -10,74 +10,29 @@
   \____|_|\__,_| \_/\_/ |_.__/ \__,_|\___|_|\_\
 </pre>
 
-### Less haystack. More needle.
+### Reclaim the context Claude Code wastes.
 
-**A tiny local proxy that sits between Claude Code and Anthropic — clawing back the tokens the CLI wastes, and sharpening the model by keeping its context window on _your_ task instead of the harness's boilerplate.**
+*Less haystack. More needle.*
+
+**Clawback is a localhost proxy for Claude Code that strips repeated system boilerplate, unused tool definitions, and noisy reminders out of every request before it reaches Anthropic — and answers throwaway title/recap side-calls locally.**
+
+**One real turn went from ~33,600 to 8,216 billed tokens — about 4× lighter.** Fewer tokens billed, more room before your rate limit, and a model spending its attention on your task instead of its own instruction manual.
+
+`Local-only` · `Fail-open` · `No hosted service` · `Your logs never leave your machine`
 
 [![CI](https://github.com/Harmenszoon/clawback/actions/workflows/ci.yml/badge.svg)](https://github.com/Harmenszoon/clawback/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
 [![License: Unlicense](https://img.shields.io/badge/license-Unlicense-blue.svg)](LICENSE)
 
+[Quickstart](#quickstart) · [The receipt](#the-receipt) · [Why it works](#why-smaller-context-matters) · [Safety](#built-to-fail-open)
+
 </div>
 
 ---
 
-## The problem
+## The receipt
 
-Every time you press Enter in Claude Code, the CLI quietly ships a **phone book** of boilerplate to the API — on *every single turn*:
-
-- a **~27 KB** behavioral system prompt (rules the model already follows by default),
-- **~90 KB** of tool manuals — *dozens* of tool definitions (one is 20 KB by itself), most of which you'll never let it touch,
-- a fresh batch of `<system-reminder>` nudges re-stapled to your messages,
-- and separate **Opus** side-calls just to invent a chat title and to "recap" when you step away.
-
-You pay for all of it. Worse: the model has to read *past* all of it to find your actual question. **The bigger the haystack, the harder the needle is to find.**
-
-## What Clawback does about it
-
-It intercepts that traffic and strips it down to what matters — without ever touching what the model actually needs:
-
-| On every turn, Claude Code sends… | Clawback forwards… |
-| --- | --- |
-| 🧾 A **~27 KB** behavioral system prompt | The 3 lines that actually matter (working dir, platform, OS) + 1 directive → **~280 chars** |
-| 🧰 The **full tool set** (**~90 KB**, dozens of tools) | Only the tools *you've* allowed |
-| 🔔 `<system-reminder>` blocks, re-injected every turn | Gone — and kept out of history too, so the prompt cache stays warm |
-| 💸 A separate **Opus** call to title the chat + another to "recap" | Answered locally, instantly, for **0 tokens** |
-
-Everything else flows through **untouched**.
-
-## Two things happen when you stop shipping junk to the model
-
-### 💰 You stop paying for boilerplate
-Title generation and recap are full **Opus** inference calls — Clawback answers them locally for nothing. Reminders that change every turn stop busting your prompt cache. Tool manuals you'll never use stop riding along.
-
-> **Straight talk:** the giant system prompt is mostly *cached*, and cache reads are cheap — so the headline savings come from the killed Opus side-calls, the cache-busting churn we eliminate, and the un-cached deltas. Real money, no hand-waving.
-
-### 🧠 The model gets sharper
-This is the part caching **can't** fix. A cached token is still a token sitting in the context window, still competing for the model's attention. Caching makes the clutter *cheap*; it doesn't make it *invisible*. Clawback is the only lever that shrinks the haystack — so the needle (your task) is easier to find. *Less haystack, more needle.*
-
-## 📊 How much does this actually save?
-
-Rough but honest estimates, derived from real captured traffic with the math shown. Mileage varies with conversation length and which tools you keep.
-
-### Tokens
-
-Clawback removes a fixed slab of overhead from **every** turn:
-
-| Trimmed each turn | tokens: before → after |
-| --- | --- |
-| Behavioral system prompt | ~6,750 → ~105 |
-| Tool definitions (full set → your lean allowlist) | ~23,000 → ~4,900 |
-| Re-injected `<system-reminder>` blocks | ~300 → 0 |
-| **Fixed overhead removed** | **≈ 25,000 tokens / turn** |
-
-That's **~50–75% of a short request**, easing to a few percent deep into a long session (where your own history is most of the payload). On top of that, the title and recap **Opus** side-calls are eliminated outright.
-
-> 💵 **On cost, honestly:** most of that overhead is *cached* (cache reads bill at ~10%), so the dollar savings are smaller than the raw token count suggests — the real money is the killed Opus calls and the cache-busting we prevent. On a Pro/Max plan it mostly buys you **more headroom before you hit your rate limit.**
-
-### 🧾 A real receipt
-
-One actual turn, pulled straight from the logs — a fresh session, a single user message:
+Numbers from real captured traffic — one actual turn, a fresh session with a single user message:
 
 | | Before *(reconstructed)* | After *(measured)* |
 | --- | --- | --- |
@@ -86,45 +41,28 @@ One actual turn, pulled straight from the logs — a fresh session, a single use
 | Reminders | present | **0** |
 | **Total request** | **~33,600 tokens** | **8,216 tokens** |
 
-A **~75% smaller request — about 4× lighter** — and the model sees only what the task needs. The *after* total (8,216) is the **exact** figure Anthropic billed; the *before* adds back the **measured** sizes of what Clawback removed.
+That's a **~75% smaller request — about 4× lighter** — with the model seeing only what the task needs. The *after* total (8,216) is the **exact** figure Anthropic billed; the *before* adds back the **measured** sizes of what Clawback removed.
 
-> And at the other extreme — in these same logs, long sessions reached **999,309** input tokens, a hair under the 1,000,000 cap. Un-trimmed, that turn would have blown past it and failed with `prompt is too long` (those 400s are in the logs, from before the proxy). Sometimes the ~25K Clawback shaves is the difference between *fits* and *fails*.
+> **Honest caveat:** most of that overhead is *cached*, and cache reads bill at ~10% — so this is **not** "75% cheaper." The reliable wins are fewer distractor tokens in the model's context, the eliminated Opus side-calls, and more headroom before your rate limit. The dollar savings are real but smaller than the token count suggests.
 
-### Focus — the haystack, quantified
-
-Caching makes the clutter cheap, but the model still has to read past it. Clawback removes **~25K distractor tokens per turn** — exactly the kind of reduction the research says matters:
-
-- 📉 **Lost in the Middle** (Liu et al., TACL 2024): accuracy follows a U-shape — a fact buried mid-context is recalled far less reliably than one near the edges, swinging results by **double-digit points**.
-- 📏 **RULER** (NVIDIA, 2024): a model's *effective* context is often a fraction of its advertised window — **only about half** of tested models held up at 32K tokens. Extra tokens aren't free.
-- 🧪 **Context Rot** (Chroma, 2025 — tested on Claude 4 among others): accuracy degrades as input grows **even on simple tasks**, and distractors make it measurably worse.
-
-We deliberately **don't** slap a "+X% smarter" sticker on it — anyone who does is guessing. The precise, defensible version: the needle didn't change; we just shrank the haystack around it.
+> **And at the other extreme:** in these same logs, long sessions reached **999,309** input tokens — a hair under the 1,000,000 cap. Un-trimmed, that turn would have blown past it and failed with `prompt is too long` (those 400s are in the logs, from before the proxy). Sometimes the ~25K Clawback shaves is the difference between *fits* and *fails*.
 
 <details>
 <summary><b>How we got these numbers</b></summary>
 
-- The **"after"** numbers are real and exact: forwarded sizes are read straight from `logs/`, and the 8,216-token total is the figure the Anthropic API actually billed (`usage`) for that turn.
-- The **"before"** is reconstructed: Clawback only logs what it *forwards*, so the original isn't stored. We add back the measured sizes of what was stripped — the system-prompt delta (~27 KB observed → 420 chars) and the dropped tool definitions (the full built-in set measured at ~93 KB / ~23K tokens in the same logs; one tool, `Workflow`, is 20 KB alone). ~4 characters per token.
-- "% of request" follows from the turn's size: overhead is most of a short/fresh request and a few percent once long conversation history dominates.
-- The focus/accuracy figures are **reported by the cited papers**, describing the failure mode Clawback targets — they are *not* a measured Clawback result.
+- The **"after"** numbers are real and exact: forwarded sizes are read straight from `logs/`, and 8,216 is the figure the Anthropic API actually billed (`usage`) for that turn.
+- The **"before"** is reconstructed: Clawback only logs what it *forwards*, so the original isn't stored. We add back the measured sizes of what was stripped — the system-prompt delta (~27 KB observed → 420 chars) and the dropped tool definitions (the full built-in set measured at ~93 KB / ~23K tokens in the same logs; one tool, `Workflow`, is 20 KB by itself). ~4 characters per token.
+- Across turns, Clawback removes roughly **~25,000 tokens of fixed overhead per turn** — most of a short request, easing to a few percent once long conversation history dominates the payload.
 
 </details>
 
-**References:** [Lost in the Middle](https://arxiv.org/abs/2307.03172) · [RULER](https://arxiv.org/abs/2404.06654) · [Context Rot](https://research.trychroma.com/context-rot)
+## Quickstart
 
-## 🛟 It can't break your session
-
-A proxy that mangles your traffic is worse than no proxy. So every transform is **fail-open**:
-
-- If it doesn't recognize something with **certainty**, it forwards your request **untouched**. The worst case is paying full price for one request — never a corrupted one.
-- Detection keys off **structure** (JSON schema shape, tool names, Markdown landmarks) — not wording — so an Anthropic copy-edit can't trip it.
-- When detection *does* drift, the un-stripped content simply shows up in the log. That's your signal, not a silent failure.
-
-Backed by **53 tests** running on Linux, macOS, and Windows across Python 3.11–3.13.
-
-## ⚡ Quickstart
+Three commands. No account, no hosted service, nothing leaves your machine.
 
 ```bash
+git clone https://github.com/Harmenszoon/clawback
+cd clawback
 pip install -r requirements.txt
 python -m clawback
 ```
@@ -142,17 +80,54 @@ export ANTHROPIC_BASE_URL=http://localhost:3456
 claude
 ```
 
-That's it. `Ctrl+C` to stop. Requires Python 3.11+; the only runtime deps are `aiohttp` and `certifi`.
+`Ctrl+C` to stop. Requires Python 3.11+; the only runtime deps are `aiohttp` and `certifi`.
 
----
+## What Clawback removes
 
-## 🎁 Bonus: it fixes a bug that wedges sessions
+Every time you press Enter, Claude Code ships a phone book of boilerplate to the API — on *every single turn*. Clawback strips it down to what matters and forwards everything else untouched:
 
-With extended thinking + tool use, the API returns `thinking` blocks interleaved among `tool_use` blocks and requires them back **in the exact same order** (it cryptographically signs each one). Claude Code sometimes regroups them on resend — and the API rejects the whole turn with a 400, **permanently wedging the session**.
+| On every turn, Claude Code sends… | Clawback forwards… |
+| --- | --- |
+| A ~27 KB behavioral system prompt | The 3 lines that actually matter (working dir, platform, OS) + 1 directive → ~280 chars |
+| The full tool set (~90 KB, dozens of tools) | Only the tools *you've* allowed |
+| `<system-reminder>` blocks, re-injected every turn | Gone — and kept out of history too, so the prompt cache stays warm |
+| A separate Opus call to title the chat + another to "recap" | Answered locally, instantly, for 0 tokens |
 
-Clawback remembers the original order and quietly restores it before forwarding. The repair is reorder-only, exact-match-or-nothing, and fails open on any doubt — so it can never make a request worse than the client already made it. You just stop hitting the wall.
+That's the ~25,000 tokens of fixed overhead, gone from every turn — and the model never has to read past it.
 
-## 🔍 Everything is logged, beautifully
+## Why smaller context matters
+
+Reclaiming context pays off twice:
+
+**Cheaper.** Title and recap are full Opus inference calls — killed. Reminders that change every turn stop busting your prompt cache. On a Pro/Max plan it mostly buys you more headroom before your rate limit.
+
+**Sharper.** This is the part caching *can't* fix. A cached token is still a token sitting in the context window, competing for the model's attention. Caching makes the clutter cheap; it doesn't make it invisible. Trimming it is one practical lever for keeping the model focused — and the research says that matters:
+
+- **Lost in the Middle** (Liu et al., TACL 2024): accuracy follows a U-shape — a fact buried mid-context is recalled far less reliably than one near the edges, swinging results by double-digit points.
+- **RULER** (NVIDIA, 2024): a model's *effective* context is often a fraction of its advertised window — only about half of tested models held up at 32K tokens. Extra tokens aren't free.
+- **Context Rot** (Chroma, 2025 — tested on Claude 4 among others): accuracy degrades as input grows, even on simple tasks, and distractors make it measurably worse.
+
+We deliberately don't slap a "+X% smarter" sticker on it — anyone who does is guessing. The precise, defensible version: the needle didn't change; we just shrank the haystack around it.
+
+**References:** [Lost in the Middle](https://arxiv.org/abs/2307.03172) · [RULER](https://arxiv.org/abs/2404.06654) · [Context Rot](https://research.trychroma.com/context-rot)
+
+## Built to fail open
+
+A proxy that mangles your traffic is worse than no proxy. So every transform is **fail-open**:
+
+- If it doesn't recognize something with certainty, it forwards your request **untouched**. The worst case is paying full price for one request — never a corrupted one.
+- Detection keys off **structure** (JSON schema shape, tool names, Markdown landmarks), not wording — so an Anthropic copy-edit can't trip it.
+- When detection *does* drift, the un-stripped content simply shows up in the log. That's your signal, not a silent failure.
+
+Backed by **53 tests** running on Linux, macOS, and Windows across Python 3.11–3.13.
+
+## It also un-wedges stuck sessions
+
+With extended thinking + tool use, the API returns `thinking` blocks interleaved among `tool_use` blocks and requires them back in the exact same order (it cryptographically signs each one). Claude Code sometimes regroups them on resend — and the API rejects the whole turn with a 400, permanently wedging the session.
+
+Clawback remembers the original order and restores it before forwarding. The repair is reorder-only, exact-match-or-nothing, and fails open on any doubt — so it can never make a request worse than the client already made it. You just stop hitting the wall.
+
+## Everything is logged
 
 Clawback writes a complete, human-readable record of every request and response — so you can finally answer *"what is Claude Code actually sending?"* by opening one file.
 
@@ -162,21 +137,19 @@ Clawback writes a complete, human-readable record of every request and response 
 
 Each record is flagged with whether Clawback intervened and how. Credentials and the `metadata.user_id` telemetry blob are redacted in the logs (but still forwarded upstream).
 
-## 🎛️ You're the policy — `tools.json`
+## You decide what the model sees
 
-Which tools reach the model is **entirely yours to decide**, in a plain JSON file you edit at your leisure:
+Which tools reach the model is entirely yours to decide, in a plain JSON file you edit at your leisure:
 
 ```json
 { "Read": true, "Edit": true, "WebSearch": true, "Bash": false, "TaskCreate": false }
 ```
 
 - Edits take effect on the **next request** — no restart.
-- A tool Clawback has never seen defaults to **allowed** and is added to the file, so nothing ever breaks silently — it just shows up for you to decide.
-- Writes are atomic; a broken file fails *safe* (allow-all + a warning, never a silent wipe of your config).
+- A tool Clawback has never seen defaults to allowed and is added to the file, so nothing ever breaks silently — it just shows up for you to decide.
+- Writes are atomic; a broken file fails safe (allow-all + a warning, never a silent wipe of your config).
 
 Start from the checked-in [`tools.json.example`](tools.json.example).
-
----
 
 ## How it works
 
@@ -195,8 +168,6 @@ Start from the checked-in [`tools.json.example`](tools.json.example).
 ```
 
 For each request Clawback either (1) **answers it locally** if it's a known auxiliary call (title, recap), or (2) **slims it** (reduce the system prompt, filter tools, strip reminders), repairs any reordered thinking blocks, forwards it, and streams the reply back **byte-for-byte** while assembling a copy for the log.
-
-### The transforms
 
 | Transform | What it does |
 | --- | --- |
@@ -233,8 +204,6 @@ Yes. `tools.json` is yours; unknown tools default to allowed and appear in the f
 
 **Is it safe to run?**
 It's a localhost, single-user tool with no auth, and its logs contain your prompts and tool output. Keep it bound to `localhost` and don't publish logs raw. See [SECURITY.md](SECURITY.md).
-
----
 
 ## Design principles
 
