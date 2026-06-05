@@ -85,14 +85,19 @@ That's the ~25,000 tokens of fixed overhead, gone from every turn — and the mo
 
 ## Wait, isn't that there for a reason?
 
-Mostly, no. Claude Code's prompt is **accreted, not curated**: it grows with every release and rarely shrinks. What Clawback strips is the dead weight that piles up:
+Mostly, no. We read through what Claude Code actually sends, and most of it is **accreted, not curated**. Here's a sample of what's on the chopping block — and why each one goes:
 
-- **Instructions for older, weaker models.** Much of the behavioral prompt hand-holds the model through things **Opus 4.8** already gets right on its own. It was written for a generation that needed it.
-- **Overcorrection for mistakes that don't happen.** Every past incident leaves a permanent "never do X" rule behind, padding the prompt against errors a capable model rarely makes anymore.
-- **Redundancy on repeat.** The same rules restated, and `<system-reminder>` nudges re-stapled to *every* turn, long after the model has read them once.
-- **Manuals for tools you'll never use.** A 20 KB `Workflow` definition (plus Cron, notebooks, and the rest) ships on every request whether you'd let the model touch those tools or not.
+**18 KB for a tool it tells you not to use.** The `Workflow` tool ships an **18,000-character** description on *every* request — then says, in its own text: *"ONLY call this tool when the user has explicitly opted into multi-agent orchestration."* That's ~4,600 tokens a turn for a feature that, by its own rule, almost never runs.
 
-This isn't incompetence. It's the cost of **one prompt that has to serve every model, every user, and every edge case at once**: sensible for Anthropic to ship, wasteful for *you* to resend on every keystroke. Clawback re-tunes it for an audience of one — you, this machine, this model. And because every cut is fail-open, it's a safe bet: if something turns out to matter, it shows up in your logs and you switch it back on.
+**Your context window, used to advertise.** The `Bash` tool's description hard-codes instructions to end every commit with `Co-Authored-By: Claude Opus 4.8` and every PR with `🤖 Generated with Claude Code`. You pay for those tokens on every request — even if you never run a shell command — so the model can stamp Anthropic's branding into your git history.
+
+**Nags about features you aren't using.** Every turn, Claude Code re-staples notes like *"The task tools haven't been used recently… consider using TaskCreate…"* and *"The date has changed… DO NOT mention this to the user, they are already aware."* If everyone already knows, repeating it to the model on every single turn is pure tax.
+
+**Manuals for tools you've turned off.** All **33 built-in tools** send their full descriptions — about **17,000 tokens** — on every request: Cron, notebooks, worktrees, plan mode, and the rest, whether you'd ever allow them or not.
+
+**Hand-holding written for weaker models.** Lines like Bash's *"IMPORTANT: Avoid using this tool to run `find`, `grep`, `cat`, `head`, `tail`, `sed`, `awk`, or `echo`…"* lecture a 2026 model against mistakes it wouldn't make. Opus 4.8 doesn't need the warning label; it needs the task.
+
+None of this is incompetence. It's the cost of **one prompt that has to serve every model, every user, and every edge case at once** — reasonable for Anthropic to ship, wasteful for *you* to resend on every keystroke. Clawback re-tunes it for an audience of one: you, this machine, this model. And every cut is fail-open, so it's a safe bet — if something turns out to matter, it surfaces in your logs and you switch it back on.
 
 ## Why smaller context matters
 
