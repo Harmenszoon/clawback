@@ -10,13 +10,11 @@
   \____|_|\__,_| \_/\_/ |_.__/ \__,_|\___|_|\_\
 </pre>
 
-### Reclaim the context Claude Code wastes.
+### Fewer tokens. Better code.
 
-*Less haystack. More needle.*
+**Clawback is a localhost proxy for Claude Code that strips the wasted boilerplate out of every request before it reaches Anthropic — so your tokens go to your work, and the model keeps its attention on your task instead of its own instruction manual.**
 
-**Clawback is a localhost proxy for Claude Code that strips repeated system boilerplate, unused tool definitions, and noisy reminders out of every request before it reaches Anthropic — and answers throwaway title/recap side-calls locally.**
-
-**One real turn went from ~33,600 to 8,216 billed tokens — about 4× lighter.** Fewer tokens billed, more room before your rate limit, and a model spending its attention on your task instead of its own instruction manual.
+**One real turn went from ~33,600 to 8,216 billed tokens — about 4× lighter.** Less to pay for, more headroom before your rate limit, and a context window spent on your code.
 
 `Local-only` · `Fail-open` · `No hosted service` · `Your logs never leave your machine`
 
