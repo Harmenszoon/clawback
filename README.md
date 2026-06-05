@@ -2,7 +2,7 @@
 
 <img src="assets/clawback-banner.png" alt="Clawback — Fewer tokens. Better code." width="640">
 
-**Clawback is a localhost proxy for Claude Code. It strips the wasted boilerplate out of every request before it reaches Anthropic — so you burn fewer tokens, and the model stays focused on your task instead of its own instruction manual.**
+**Clawback is a localhost proxy for Claude Code that trims every request before it reaches Anthropic, cutting token waste and keeping the model focused on your code.**
 
 **One real turn went from ~33,600 to 8,216 billed tokens — about 4× lighter.** Less to pay for, more headroom before your rate limit, and a context window spent on your code.
 
