@@ -123,7 +123,7 @@ A proxy that mangles your traffic is worse than no proxy. So every transform is 
 - Detection keys off **structure** (JSON schema shape, tool names, Markdown landmarks), not wording — so an Anthropic copy-edit can't trip it.
 - When detection *does* drift, the un-stripped content simply shows up in the log. That's your signal, not a silent failure.
 
-Backed by **53 tests** running on Linux, macOS, and Windows across Python 3.11–3.13.
+Backed by **59 tests** running on Linux, macOS, and Windows across Python 3.11–3.13.
 
 ## It also un-wedges stuck sessions
 
@@ -177,6 +177,7 @@ For each request Clawback either (1) **answers it locally** if it's a known auxi
 | --- | --- |
 | `title-gen` *(short-circuit)* | Detects the title-request schema and returns a synthetic `CONVERSATION_<hex>` — no upstream call. |
 | `recap` *(short-circuit)* | Detects the "user stepped away" prompt and returns `"Continuing."` instead of paying Opus to summarize. |
+| `strip-1m-model-suffix` *(repair)* | Claude Code 2.1.x sends its `[1m]` 1M-context model alias verbatim in some auxiliary calls, which the API 404s; the 1M window is actually selected by a beta header the CLI already sends, so the suffix is dropped. |
 | `reduce-main-system` | Replaces the ~27 KB behavioral prompt with the operational env lines + one tool-selection directive. |
 | `filter-tools` | Drops tools disabled in `tools.json`; auto-discovers new ones; never drops a tool the request *forces* via `tool_choice`. |
 | `strip-system-reminders` | Removes injected reminders in all three forms (standalone blocks, inline in tool results, and `role:"system"` messages), consistently across history so the cache prefix holds. |
@@ -238,7 +239,7 @@ assets/              logo / banner images
 
 ```bash
 pip install -r requirements-dev.txt
-python -m pytest          # 53 tests, no network needed
+python -m pytest          # 59 tests, no network needed
 ruff check . && ruff format --check .
 ```
 

@@ -22,6 +22,12 @@ There are two entry points:
                 static "Continuing." instead of paying Opus to summarize.
 
   Mutation:
+    strip-1m-model-suffix     Claude Code 2.1.x sends its "[1m]" 1M-context
+                              model alias verbatim in some auxiliary calls
+                              (observed: the max_tokens=1 "quota" probe),
+                              which the API 404s. The 1M window is selected
+                              by the context-1m beta header the CLI already
+                              sends, so the suffix is dropped.
     reduce-main-system        The main conversation carries a ~27K
                               behavioral prompt cached for an hour. We
                               replace its content with the three lines of
@@ -309,6 +315,11 @@ def apply_request_transforms(body: Any) -> tuple[Any, list[str]]:
 
     applied: list[str] = []
 
+    normalized = _strip_model_1m_suffix(body)
+    if normalized is not None:
+        body = normalized
+        applied.append("strip-1m-model-suffix")
+
     reduced = _reduce_main_system_block(body)
     if reduced is not None:
         body = reduced
@@ -339,6 +350,25 @@ def apply_request_transforms(body: Any) -> tuple[Any, list[str]]:
         applied.append("strip-system-reminders")
 
     return body, applied
+
+
+# Claude Code 2.1.x sends its "[1m]" (1M-context) model alias verbatim in
+# some auxiliary calls — observed live: the max_tokens=1 "quota" probe with
+# model "claude-fable-5[1m]" — and the API rejects the literal name with a
+# 404 not_found_error. The 1M window is actually selected by the
+# `context-1m-2025-08-07` beta header (which the CLI sends on every request),
+# so the bracket suffix carries no information upstream needs. Strip it.
+# Repair-style transform: it only ever fires on a request shape that is
+# observed to fail; a plain model name passes through untouched.
+_MODEL_1M_SUFFIX = "[1m]"
+
+
+def _strip_model_1m_suffix(body: dict) -> dict | None:
+    """Drop a literal "[1m]" suffix from the model name. None if absent."""
+    model = body.get("model")
+    if not isinstance(model, str) or not model.endswith(_MODEL_1M_SUFFIX):
+        return None
+    return {**body, "model": model[: -len(_MODEL_1M_SUFFIX)]}
 
 
 # Fields we keep from the env section of the main system prompt.
@@ -492,10 +522,18 @@ _WHOLE_REMINDER_RE = re.compile(
     re.DOTALL,
 )
 
-# Inline matcher: unanchored. Consumes adjacent newlines on either side so
-# stripping doesn't leave stranded blank lines between real content blocks.
+# Inline matcher: anchored to the END of the string and tempered. Observed
+# Claude Code behavior is to *append* reminders after a tool's real output,
+# so only a run of complete reminder blocks at the very end qualifies. The
+# tempered inner atom — (?:(?!</?system-reminder>).) — cannot cross another
+# tag boundary, so a match can never span legitimate content sandwiched
+# between quoted tags. Both gates protect a tool_result that merely *quotes*
+# the tags mid-content (e.g. Read-ing this very file: an unanchored DOTALL
+# match once excised ~460 lines of source between a tag quoted in a docstring
+# and another quoted in a regex literal). A reminder anywhere other than the
+# tail fails open: it passes through and surfaces in the log.
 _INLINE_REMINDER_RE = re.compile(
-    r"\n*<system-reminder>.*?</system-reminder>\n*",
+    r"\n*(?:<system-reminder>(?:(?!</?system-reminder>).)*</system-reminder>\s*)+\Z",
     re.DOTALL,
 )
 
@@ -508,17 +546,17 @@ def _is_whole_reminder_block(block: Any) -> bool:
 
 
 def _clean_inline_reminders(block: Any) -> dict | None:
-    """If this `tool_result` block carries embedded <system-reminder> tags in
-    its content, return a copy with them excised in place. Else None.
+    """If this `tool_result` block ends with appended <system-reminder>
+    blocks, return a copy with that tail excised. Else None.
 
-    Only `tool_result` content is rewritten. Reminders never ride *inline* with
-    a user's own words: in observed traffic a user-authored text block is either
-    wholly a reminder (dropped upstream by `_is_whole_reminder_block`) or carries
-    no reminder at all. Running an unanchored regex over real user prose would
-    therefore buy nothing while risking the silent corruption of a message that
-    merely quotes the tag (e.g. a question *about* `<system-reminder>` — exactly
-    the case when using Claude Code on this proxy). A partial reminder inside
-    user text fails open: it passes through and surfaces in the log.
+    Only `tool_result` content is rewritten, and only a complete reminder run
+    at the *end* of the string is removed — that is where Claude Code appends
+    them, and end-anchoring (plus the tempered regex) means content that
+    merely quotes the tags is never touched. This matters in practice: a Read
+    of any file containing the literal tags (this proxy's own source, a test
+    fixture, docs about Claude Code) flows through as a tool_result, and an
+    unanchored match silently corrupted exactly that case. Reminders anywhere
+    else fail open: they pass through and surface in the log.
 
     Handles two payload shapes for tool_result.content:
       - A string (most common — file reads, command output, etc.).

@@ -386,6 +386,14 @@ def _fmt_usage(usage: dict) -> str:
     if isinstance(cc, dict):
         for k, v in cc.items():
             lines.append(f"- {k}: {v:,}")
+    # New-style usage detail (Fable-era responses): nested token breakdowns,
+    # e.g. output_tokens_details.thinking_tokens. Rendered generically so new
+    # sub-fields appear without a code change.
+    otd = usage.get("output_tokens_details")
+    if isinstance(otd, dict):
+        for k, v in otd.items():
+            if isinstance(v, int):
+                lines.append(f"- {k}: {v:,}")
     return "\n".join(lines) if lines else "_(none)_"
 
 

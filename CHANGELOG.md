@@ -4,6 +4,42 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [semantic versioning](https://semver.org/).
 
+## [0.5.0] — 2026-06-09
+
+Compatibility pass for the Fable model family (`claude-fable-5`) and
+Claude Code 2.1.x, verified by dogfooding the proxy against itself.
+
+### Added
+- **`strip-1m-model-suffix` transform.** Claude Code 2.1.x sends its `[1m]`
+  (1M-context) model alias verbatim in some auxiliary calls — observed live:
+  the `max_tokens: 1` "quota" probe with `claude-fable-5[1m]` — and the API
+  rejects the literal name with a 404. The 1M window is actually selected by
+  the `context-1m-2025-08-07` beta header the CLI already sends, so the
+  suffix is stripped. A plain model name is never touched.
+- **Renderer: new usage detail.** Fable-era responses carry
+  `output_tokens_details` (e.g. `thinking_tokens`); the markdown usage
+  section now renders the breakdown generically.
+
+### Fixed
+- **Inline reminder stripping no longer corrupts tool_results that quote the
+  tags.** Found live while reviewing this very project through the proxy: a
+  `Read` of `clawback/transforms.py` (which contains literal
+  `<system-reminder>` text in its own regexes and docs) let the unanchored
+  DOTALL matcher span from a tag quoted in a docstring to one quoted in a
+  regex literal, silently excising ~460 lines of source from the forwarded
+  tool_result. The matcher is now end-anchored (Claude Code *appends*
+  reminders after real tool output) and tempered (a match can never cross
+  another tag boundary). Reminders anywhere but the tail now fail open and
+  surface in the log.
+
+### Verified (no change needed)
+- `reduce-main-system`, `filter-tools`, `strip-system-reminders`, and the
+  `title-gen` short-circuit all fire correctly on Claude Code 2.1.170 /
+  `claude-fable-5` traffic, including the new request fields
+  (`thinking: {"type": "adaptive"}`, `output_config: {"effort": ...}`,
+  `context_management`) and the `x-anthropic-billing-header` system block,
+  which pass through untouched.
+
 ## [0.4.0] — 2026-06-05
 
 ### Changed

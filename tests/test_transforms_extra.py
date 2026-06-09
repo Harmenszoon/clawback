@@ -122,6 +122,38 @@ def test_recap_not_triggered_on_block_content():
     assert maybe_shortcut(body) is None
 
 
+# --- strip-1m-model-suffix -----------------------------------------------------
+
+
+def test_1m_suffix_stripped_from_quota_probe():
+    # Exact shape observed live from claude-cli 2.1.170: the max_tokens=1
+    # "quota" probe carries the [1m] alias verbatim and upstream 404s it.
+    body = {
+        "model": "claude-fable-5[1m]",
+        "max_tokens": 1,
+        "messages": [{"role": "user", "content": "quota"}],
+    }
+    out, applied = apply_request_transforms(body)
+    assert "strip-1m-model-suffix" in applied
+    assert out["model"] == "claude-fable-5"
+    assert body["model"] == "claude-fable-5[1m]"  # copy-on-write
+
+
+def test_plain_model_name_untouched():
+    body = {"model": "claude-fable-5", "messages": [{"role": "user", "content": "hi"}]}
+    out, applied = apply_request_transforms(body)
+    assert "strip-1m-model-suffix" not in applied
+    assert out["model"] == "claude-fable-5"
+
+
+def test_1m_suffix_only_stripped_at_end():
+    # A bracket elsewhere in the name is not the alias — leave it alone.
+    body = {"model": "claude[1m]-custom", "messages": []}
+    out, applied = apply_request_transforms(body)
+    assert "strip-1m-model-suffix" not in applied
+    assert out["model"] == "claude[1m]-custom"
+
+
 # --- synthetic SSE round-trips through the assembler --------------------------
 
 
