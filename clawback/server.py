@@ -103,6 +103,7 @@ class ProxyHandler:
         started_at: datetime,
         path_with_query: str,
         req_body_parsed: Any,
+        request_size: int,
         shortcut: tuple[dict, str],
     ) -> web.StreamResponse:
         """Emit a synthetic response — no upstream call — and log the suppression."""
@@ -146,6 +147,7 @@ class ProxyHandler:
             response_headers=sent_headers,
             response_body=synth_body,
             short_circuited=reason,
+            bytes_unsent=request_size,
         )
         return response
 
@@ -155,6 +157,7 @@ class ProxyHandler:
         assert self.session is not None
 
         req_body_bytes = await request.read()
+        original_size = len(req_body_bytes)
         req_body_parsed = _try_parse_json(req_body_bytes)
         target_url = f"{TARGET_BASE}{request.rel_url}"
         forward_headers = _build_forward_headers(request)
@@ -179,6 +182,7 @@ class ProxyHandler:
                 started_at,
                 path_with_query,
                 req_body_parsed,
+                original_size,
                 shortcut,
             )
 
@@ -211,6 +215,10 @@ class ProxyHandler:
         if repaired:
             transforms_applied = [*transforms_applied, "restore-thinking-order"]
 
+        # Approximate per-request savings: Claude Code sends compact JSON, so
+        # the size delta of the re-serialized body is the content removed by
+        # the transforms (a reorder-only repair nets out near zero).
+        bytes_removed: int | None = None
         if transforms_applied:
             req_body_parsed = forwarded_body
             req_body_bytes = json.dumps(
@@ -218,6 +226,7 @@ class ProxyHandler:
                 ensure_ascii=False,
                 separators=(",", ":"),
             ).encode("utf-8")
+            bytes_removed = original_size - len(req_body_bytes)
 
         try:
             async with self.session.request(
@@ -230,8 +239,11 @@ class ProxyHandler:
                 response_headers = _filter_headers(upstream.headers, RESPONSE_STRIP_HEADERS)
                 is_sse = (upstream.content_type or "").startswith("text/event-stream")
 
+                stream_error: str | None = None
                 if is_sse:
-                    response, resp_body, total_bytes = await _stream_sse(request, upstream, response_headers)
+                    response, resp_body, total_bytes, stream_error = await _stream_sse(
+                        request, upstream, response_headers
+                    )
                 else:
                     response, resp_body, total_bytes = await _buffer_response(request, upstream, response_headers)
 
@@ -248,6 +260,8 @@ class ProxyHandler:
                 elapsed = (datetime.now(UTC) - started_at).total_seconds()
 
                 _log_console(started_at, request.method, path_with_query, upstream.status, total_bytes, elapsed)
+                if stream_error:
+                    print(f"  Note: {stream_error}", flush=True)
 
                 self._record(
                     started_at=started_at,
@@ -259,7 +273,9 @@ class ProxyHandler:
                     response_status=upstream.status,
                     response_headers=dict(response_headers),
                     response_body=resp_body,
+                    error=stream_error,
                     transforms_applied=transforms_applied,
+                    bytes_removed=bytes_removed,
                 )
 
                 return response
@@ -302,28 +318,52 @@ async def _stream_sse(
     request: web.Request,
     upstream: aiohttp.ClientResponse,
     response_headers: dict[str, str],
-) -> tuple[web.StreamResponse, Any, int]:
-    """Forward an SSE response chunk-by-chunk; assemble a log copy in parallel."""
+) -> tuple[web.StreamResponse, Any, int, str | None]:
+    """Forward an SSE response chunk-by-chunk; assemble a log copy in parallel.
+
+    Returns (response, assembled_body, bytes_streamed, stream_error).
+
+    `stream_error` is set when the stream ended abnormally, in either
+    direction. Once the 200 status line has gone out, a failure can no longer
+    be reported as an HTTP error — the only honest options are to finalize the
+    truncated stream and record what actually happened. Two cases:
+
+      * Upstream died mid-stream: the partial body is logged with the error
+        attached (not mislabeled as a proxy 502 the client never saw).
+      * The client went away (e.g. the user hit Esc): the upstream read stops
+        too. Draining to completion would keep the model generating — and
+        billing — a reply nobody will ever see; aborting matches what Claude
+        Code gets without a proxy, where its own disconnect cancels generation.
+    """
     response = web.StreamResponse(status=upstream.status, headers=response_headers)
     response.enable_chunked_encoding()
     await response.prepare(request)
 
     assembler = SSEAssembler()
     total_bytes = 0
-    client_alive = True
+    stream_error: str | None = None
 
-    async for chunk in upstream.content.iter_any():
-        if not chunk:
-            continue
-        total_bytes += len(chunk)
-        assembler.feed(chunk)
-        if client_alive:
+    try:
+        async for chunk in upstream.content.iter_any():
+            if not chunk:
+                continue
+            total_bytes += len(chunk)
+            assembler.feed(chunk)
             try:
                 await response.write(chunk)
             except (ConnectionError, aiohttp.ClientConnectionError):
-                client_alive = False  # keep draining upstream so the log is complete
+                stream_error = "client disconnected mid-stream; upstream aborted"
+                break
+    except (TimeoutError, OSError, aiohttp.ClientError) as exc:
+        stream_error = f"upstream stream aborted mid-response ({type(exc).__name__}: {exc})"
 
-    return response, assembler.assembled(), total_bytes
+    if stream_error:
+        # Piggyback the assembler's error channel: the markdown render surfaces
+        # it, and the thinking-order cache refuses to treat an errored body as
+        # a canonical turn.
+        assembler.errors.append({"type": "proxy_stream_interrupted", "message": stream_error})
+
+    return response, assembler.assembled(), total_bytes, stream_error
 
 
 async def _buffer_response(

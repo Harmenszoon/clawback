@@ -129,6 +129,39 @@ def test_unknown_event_type_is_counted():
     assert msg["unknown_event_types"] == {"something_new": 2}
 
 
+def test_unknown_event_payloads_are_sampled():
+    """Unknown events keep their payloads (capped), not just a count — the
+    payload is the evidence when Anthropic ships a new stream shape."""
+    a = SSEAssembler()
+    msg = _feed_all(
+        a,
+        _event("something_new", {"type": "something_new", "detail": "first"}),
+        _event("something_new", {"type": "something_new", "detail": "second"}),
+    )
+    assert msg["unknown_event_samples"] == [
+        {"type": "something_new", "detail": "first"},
+        {"type": "something_new", "detail": "second"},
+    ]
+
+
+def test_crlf_line_endings_supported():
+    """The SSE spec allows CRLF record separators; a server-side switch must
+    not silently blind the log or the thinking-order recorder."""
+    a = SSEAssembler()
+    ev = b'event: error\r\ndata: {"type":"error","error":{"type":"api_error","message":"crlf"}}\r\n\r\n'
+    a.feed(ev)
+    msg = a.assembled()
+    assert msg["errors"] == [{"type": "api_error", "message": "crlf"}]
+
+
+def test_data_line_without_space_parsed():
+    """`data:` with no following space is valid SSE and must parse."""
+    a = SSEAssembler()
+    a.feed(b'event: error\ndata:{"type":"error","error":{"type":"api_error","message":"tight"}}\n\n')
+    msg = a.assembled()
+    assert msg["errors"] == [{"type": "api_error", "message": "tight"}]
+
+
 def test_done_sentinel_ignored():
     a = SSEAssembler()
     a.feed(b"data: [DONE]\n\n")

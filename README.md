@@ -123,7 +123,7 @@ A proxy that mangles your traffic is worse than no proxy. So every transform is 
 - Detection keys off **structure** (JSON schema shape, tool names, Markdown landmarks), not wording — so an Anthropic copy-edit can't trip it.
 - When detection *does* drift, the un-stripped content simply shows up in the log. That's your signal, not a silent failure.
 
-Backed by **59 tests** running on Linux, macOS, and Windows across Python 3.11–3.13.
+Backed by **83 tests** running on Linux, macOS, and Windows across Python 3.11–3.13.
 
 ## It also un-wedges stuck sessions
 
@@ -139,7 +139,9 @@ Clawback writes a complete, human-readable record of every request and response 
 - `NNN_*.md` — a paired, readable rendering: system blocks sized and cache-flagged, a tool index, every message block annotated, usage breakdown.
 - `index.jsonl` — one line per request to scan or grep.
 
-Each record is flagged with whether Clawback intervened and how. Credentials and the `metadata.user_id` telemetry blob are redacted in the logs (but still forwarded upstream).
+Each record is flagged with whether Clawback intervened and how — including **how many bytes each mutation removed** and how large each short-circuited request would have been. Credentials and the `metadata.user_id` telemetry blob are redacted in the logs (but still forwarded upstream).
+
+And `python -m clawback.stats` turns a run's index into your own receipt: per-transform hit counts, bytes/tokens removed and never sent, and the run's summed billed usage. A transform whose count drops to zero while traffic continues is your drift signal that detection needs updating.
 
 ## You decide what the model sees
 
@@ -171,7 +173,7 @@ Start from the checked-in [`tools.json.example`](tools.json.example).
    locally)     strip reminders)
 ```
 
-For each request Clawback either (1) **answers it locally** if it's a known auxiliary call (title, recap), or (2) **slims it** (reduce the system prompt, filter tools, strip reminders), repairs any reordered thinking blocks, forwards it, and streams the reply back **byte-for-byte** while assembling a copy for the log.
+For each request Clawback either (1) **answers it locally** if it's a known auxiliary call (title, recap), or (2) **slims it** (reduce the system prompt, filter tools, strip reminders), repairs any reordered thinking blocks, forwards it, and streams the reply back **unmodified, event-for-event** (after transparent decompression) while assembling a copy for the log.
 
 | Transform | What it does |
 | --- | --- |
@@ -192,6 +194,7 @@ All settings are environment variables (optionally from a `.env` file):
 | `PROXY_HOST` | `localhost` | Bind address |
 | `PROXY_PORT` | `3456` | Listen port |
 | `PROXY_TARGET_URL` | `https://api.anthropic.com` | Upstream API endpoint |
+| `CLAWBACK_HOME` | *(see below)* | Where `tools.json` and `logs/` live. Default: the repo root when running from a checkout, `~/.clawback` when pip-installed. |
 
 ## FAQ
 
@@ -229,6 +232,7 @@ clawback/
   tool_filter.py     dynamic tools.json allowlist with atomic writes
   sse.py             SSE stream assembler (observation-only, for the log)
   log.py / render.py per-run logging + JSON→Markdown rendering
+  stats.py           savings / hit-rate summary over a run's index.jsonl
   config.py          env loading, paths, header filters
 tests/               pytest suite (transforms, SSE, repair, redaction, async handler)
 .github/             CI + issue/PR templates

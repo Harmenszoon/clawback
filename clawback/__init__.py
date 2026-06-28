@@ -6,4 +6,4 @@ per-request log for inspection. See README.md for the architecture and
 the rationale behind each transform.
 """
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"

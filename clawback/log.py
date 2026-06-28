@@ -64,6 +64,8 @@ class RunLogger:
         error: str | None = None,
         short_circuited: str | None = None,
         transforms_applied: list[str] | None = None,
+        bytes_removed: int | None = None,
+        bytes_unsent: int | None = None,
     ) -> None:
         """Write one request/response record to disk (non-blocking)."""
         async with self._seq_lock:
@@ -95,6 +97,10 @@ class RunLogger:
             record["short_circuited"] = short_circuited
         if transforms_applied:
             record["transforms_applied"] = transforms_applied
+        if bytes_removed is not None:
+            record["bytes_removed"] = bytes_removed
+        if bytes_unsent is not None:
+            record["bytes_unsent"] = bytes_unsent
 
         index_entry = _summarize(record)
 
@@ -174,6 +180,8 @@ def _summarize(record: dict) -> dict:
         **({"error": record["error"]} if "error" in record else {}),
         **({"short_circuited": record["short_circuited"]} if "short_circuited" in record else {}),
         **({"transforms_applied": record["transforms_applied"]} if "transforms_applied" in record else {}),
+        **({"bytes_removed": record["bytes_removed"]} if "bytes_removed" in record else {}),
+        **({"bytes_unsent": record["bytes_unsent"]} if "bytes_unsent" in record else {}),
     }
 
 

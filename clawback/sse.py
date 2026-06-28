@@ -10,12 +10,23 @@ from __future__ import annotations
 
 import codecs
 import json
+import re
 from typing import Any
 
 # Events outside the content/message lifecycle that carry nothing for the
 # assembled message and are safely ignored: pings are keepalives, and a
 # message_stop payload is empty (the stop_reason arrives on message_delta).
 _BENIGN_EVENT_TYPES = frozenset({"ping", "message_stop"})
+
+# SSE record separator. Anthropic emits LF today; the spec also allows CRLF,
+# and a server-side change to CRLF would otherwise silently blind the log
+# (and the thinking-order recorder) without breaking the forwarded stream.
+_EVENT_SEP = re.compile(r"\r?\n\r?\n")
+
+# Unknown-event payloads kept verbatim for the log. They are the primary
+# evidence when Anthropic ships a new stream shape; capped so a pathological
+# stream cannot grow the assembled record without bound.
+_MAX_UNKNOWN_SAMPLES = 10
 
 
 class SSEAssembler:
@@ -52,14 +63,15 @@ class SSEAssembler:
         # logged as an empty, success-shaped message.
         self.errors: list[dict] = []
         self.unknown_event_types: dict[str, int] = {}
+        self.unknown_event_samples: list[dict] = []
 
     # ------------------------------------------------------------------ API
 
     def feed(self, chunk: bytes) -> None:
-        """Parse any complete `event\\n\\n` records in chunk; buffer the rest."""
+        """Parse any complete blank-line-terminated records in chunk; buffer the rest."""
         self._buf += self._decoder.decode(chunk)
-        while "\n\n" in self._buf:
-            event_str, self._buf = self._buf.split("\n\n", 1)
+        while (sep := _EVENT_SEP.search(self._buf)) is not None:
+            event_str, self._buf = self._buf[: sep.start()], self._buf[sep.end() :]
             self._handle_event(event_str)
 
     def assembled(self) -> dict:
@@ -92,6 +104,8 @@ class SSEAssembler:
             message["errors"] = self.errors
         if self.unknown_event_types:
             message["unknown_event_types"] = self.unknown_event_types
+        if self.unknown_event_samples:
+            message["unknown_event_samples"] = self.unknown_event_samples
         return message
 
     # ----------------------------------------------------------- internals
@@ -120,21 +134,32 @@ class SSEAssembler:
             self.errors.append(err if isinstance(err, dict) else {"raw": data})
         elif etype and etype not in _BENIGN_EVENT_TYPES:
             self.unknown_event_types[etype] = self.unknown_event_types.get(etype, 0) + 1
+            if len(self.unknown_event_samples) < _MAX_UNKNOWN_SAMPLES:
+                self.unknown_event_samples.append(data)
 
     @staticmethod
     def _parse_data_line(event_str: str) -> dict | None:
-        """Return the JSON payload of the `data:` line, or None for [DONE]/junk."""
-        for line in event_str.split("\n"):
-            if not line.startswith("data: "):
+        """Return the JSON payload of the event's `data` line(s), or None for [DONE]/junk.
+
+        Follows the SSE spec where it costs nothing to do so: `data:` with or
+        without the optional following space, CRLF or LF line endings, and
+        multiple `data` lines joined with newlines before parsing.
+        """
+        data_lines: list[str] = []
+        for line in event_str.splitlines():
+            if not line.startswith("data:"):
                 continue
-            payload = line[6:]
-            if payload.strip() == "[DONE]":
-                return None
-            try:
-                return json.loads(payload)
-            except json.JSONDecodeError:
-                return None
-        return None
+            payload = line[5:]
+            data_lines.append(payload[1:] if payload.startswith(" ") else payload)
+        if not data_lines:
+            return None
+        joined = "\n".join(data_lines)
+        if joined.strip() == "[DONE]":
+            return None
+        try:
+            return json.loads(joined)
+        except json.JSONDecodeError:
+            return None
 
     def _on_message_start(self, data: dict) -> None:
         m = data.get("message", {})

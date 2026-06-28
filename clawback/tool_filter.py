@@ -43,10 +43,10 @@ import json
 import os
 from typing import Any
 
-from .config import PROJECT_ROOT
+from .config import DATA_HOME
 
-_CONFIG_PATH = PROJECT_ROOT / "tools.json"
-_TMP_PATH = PROJECT_ROOT / "tools.json.tmp"
+_CONFIG_PATH = DATA_HOME / "tools.json"
+_TMP_PATH = DATA_HOME / "tools.json.tmp"
 
 
 def filter_tools(body: dict) -> tuple[dict, list[str], list[str]] | None:
@@ -82,6 +82,7 @@ def filter_tools(body: dict) -> tuple[dict, list[str], list[str]] | None:
     dropped: list[str] = []
     discovered: list[str] = []
     forced_overrides: list[str] = []
+    dropped_cache_control: Any = None
 
     for tool in tools:
         if not isinstance(tool, dict):
@@ -119,6 +120,13 @@ def filter_tools(body: dict) -> tuple[dict, list[str], list[str]] | None:
             kept.append(tool)
         else:
             dropped.append(name)
+            # Claude Code marks its prompt-cache breakpoint by putting
+            # cache_control on the last tool definition. Remember the marker of
+            # the last dropped tool that carried one so it can be re-attached
+            # below — silently discarding the breakpoint would turn every
+            # subsequent request into a full cache miss.
+            if tool.get("cache_control"):
+                dropped_cache_control = tool["cache_control"]
 
     # Persist discoveries first. Recording a newly-seen tool is independent of
     # whether this request ends up filtered or fails open below, so it must not
@@ -159,6 +167,14 @@ def filter_tools(body: dict) -> tuple[dict, list[str], list[str]] | None:
 
     if not dropped and not discovered:
         return None
+
+    # Re-attach a cache breakpoint lost with a dropped tool. Moving it onto the
+    # new last kept tool keeps the tools prefix cacheable; the breakpoint count
+    # never grows, and a kept tool that already carries its own marker wins.
+    if dropped_cache_control and kept:
+        last = kept[-1]
+        if isinstance(last, dict) and not last.get("cache_control"):
+            kept[-1] = {**last, "cache_control": dropped_cache_control}
 
     return {**body, "tools": kept}, dropped, discovered
 

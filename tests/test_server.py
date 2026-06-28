@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 
+import aiohttp
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
@@ -154,6 +155,42 @@ async def test_sse_passthrough_streams_and_assembles_for_log(tmp_path):
         # The log captured the assembled message.
         record = json.loads(next(tmp_path.glob("*.json")).read_text(encoding="utf-8"))
         assert record["response"]["body"]["content"] == [{"type": "text", "text": "hello"}]
+    finally:
+        await client.close()
+
+
+async def test_upstream_failure_mid_sse_finalizes_200_and_logs_truth(tmp_path):
+    """Once the 200/SSE status line has gone out, an upstream failure can't
+    become a 502. The truncated stream is finalized as-is and the log records
+    what actually happened: status 200 plus an explicit stream error."""
+    partial = (
+        b'event: message_start\ndata: {"type":"message_start","message":'
+        b'{"id":"msg_x","model":"claude","type":"message","role":"assistant","usage":{}}}\n\n'
+    )
+
+    class _ExplodingContent:
+        async def iter_any(self):
+            yield partial
+            raise aiohttp.ClientPayloadError("upstream died")
+
+    upstream = _FakeUpstream(
+        status=200,
+        headers={"Content-Type": "text/event-stream"},
+        content_type="text/event-stream",
+    )
+    upstream.content = _ExplodingContent()
+
+    client, handler = await _client(tmp_path, upstream)
+    try:
+        resp = await client.post("/v1/messages", json={"model": "claude", "messages": [], "stream": True})
+        assert resp.status == 200
+        assert await resp.read() == partial  # client got exactly the bytes that arrived
+
+        await _drain_logs(handler)
+        record = json.loads(next(tmp_path.glob("*.json")).read_text(encoding="utf-8"))
+        assert record["response"]["status"] == 200  # not mislabeled as a 502
+        assert "aborted" in record["error"]
+        assert record["response"]["body"]["errors"][0]["type"] == "proxy_stream_interrupted"
     finally:
         await client.close()
 

@@ -188,3 +188,49 @@ def test_forced_new_tool_is_kept_and_discovered(cfg):
     _new_body, _dropped, discovered = result
     assert discovered == ["BrandNew"]
     assert json.loads(path.read_text(encoding="utf-8"))["BrandNew"] is True
+
+
+# --- cache_control breakpoint preservation -----------------------------------
+
+
+def test_cache_breakpoint_moves_when_marked_last_tool_dropped(cfg):
+    """Claude Code marks its prompt-cache breakpoint on the last tool
+    definition. Dropping that tool must move the marker to the new last kept
+    tool, or every subsequent request silently becomes a full cache miss."""
+    write, _ = cfg
+    write({"Read": True, "Workflow": False})
+
+    tools = [{"name": "Read"}, {"name": "Workflow", "cache_control": {"type": "ephemeral"}}]
+    result = tool_filter.filter_tools({"tools": tools})
+    assert result is not None
+    new_body, dropped, _ = result
+    assert dropped == ["Workflow"]
+    assert new_body["tools"] == [{"name": "Read", "cache_control": {"type": "ephemeral"}}]
+    # Copy-on-write: the caller's original tool dict is untouched.
+    assert tools[0] == {"name": "Read"}
+
+
+def test_cache_breakpoint_not_overwritten_on_already_marked_tool(cfg):
+    write, _ = cfg
+    write({"Keep": True, "Drop": False})
+
+    tools = [
+        {"name": "Keep", "cache_control": {"type": "ephemeral", "ttl": "1h"}},
+        {"name": "Drop", "cache_control": {"type": "ephemeral"}},
+    ]
+    result = tool_filter.filter_tools({"tools": tools})
+    assert result is not None
+    new_body, _, _ = result
+    # The kept tool's own marker wins; the dropped tool's is not copied over.
+    assert new_body["tools"][-1]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
+
+
+def test_no_cache_control_no_reattach(cfg):
+    write, _ = cfg
+    write({"Read": True, "Bash": False})
+
+    result = tool_filter.filter_tools({"tools": [{"name": "Read"}, {"name": "Bash"}]})
+    assert result is not None
+    new_body, _, _ = result
+    assert new_body["tools"] == [{"name": "Read"}]
+    assert "cache_control" not in new_body["tools"][0]

@@ -60,10 +60,14 @@ def _render_header(rec: dict) -> str:
         f"`{ts}` · `elapsed {elapsed}s` · `status {status}`",
     ]
     if short_circuited:
-        lines.append(f"\n> **Short-circuited locally — never sent upstream.** Reason: `{short_circuited}`")
+        unsent = rec.get("bytes_unsent")
+        size_note = f" · {unsent:,} request bytes never sent upstream" if isinstance(unsent, int) else ""
+        lines.append(f"\n> **Short-circuited locally — never sent upstream.** Reason: `{short_circuited}`{size_note}")
     if transforms_applied:
         joined = ", ".join(f"`{t}`" for t in transforms_applied)
-        lines.append(f"\n> **Request mutated before forwarding.** Transforms: {joined}")
+        removed = rec.get("bytes_removed")
+        size_note = f" · ~{removed:,} bytes removed" if isinstance(removed, int) else ""
+        lines.append(f"\n> **Request mutated before forwarding.** Transforms: {joined}{size_note}")
     if err:
         lines.append(f"\n> **Error:** {err}")
     return "\n".join(lines)
@@ -76,7 +80,10 @@ def _render_request_meta(rec: dict) -> str:
 
     out = ["## Request"]
 
-    out.append("\n### Headers\n")
+    # Headers are the *inbound* view (what Claude Code sent the proxy); the
+    # body below is the *forwarded* view when transforms ran. Hop-by-hop
+    # headers are dropped and Host is rewritten before the upstream call.
+    out.append("\n### Headers (client → proxy)\n")
     out.append(_fmt_headers(headers))
 
     if body is None:
@@ -174,7 +181,7 @@ def _render_response(rec: dict) -> str:
 
     out = [f"## Response — status {status}"]
 
-    out.append("\n### Headers\n")
+    out.append("\n### Headers (upstream, as forwarded to client)\n")
     out.append(_fmt_headers(headers))
 
     if isinstance(body, dict):

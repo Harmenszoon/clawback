@@ -4,6 +4,87 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [semantic versioning](https://semver.org/).
 
+## [0.6.0] — 2026-06-09
+
+Hardening pass driven by a full code/architecture review (including an
+independent second-opinion review): every fail-open gap found was closed,
+and the proxy now measures its own savings.
+
+### Fixed
+- **Reminder stripping can no longer produce empty content blocks.** A
+  `tool_result` text sub-block that is *wholly* a reminder is now dropped
+  from the list (the API rejects empty text blocks); if excision would empty
+  the whole list — or reduce a string content to nothing — the block is left
+  untouched instead. Closes the one path where stripping could have
+  manufactured an upstream 400.
+- **`title-gen` detection tightened.** The schema must now be *exactly*
+  `{"title"}`. A future Claude Code call asking for `{"title", "description"}`
+  (a PR title, a plan title…) is a different feature and no longer gets
+  hijacked with a synthetic `CONVERSATION_<hex>`.
+- **Mid-stream upstream failures are no longer mislogged as proxy 502s.**
+  Once the 200/SSE status line has gone out, a failure can't become an HTTP
+  error; the truncated stream is finalized as-is and the record now shows the
+  truth — status 200 plus an explicit `proxy_stream_interrupted` error — and
+  the partial turn is never recorded as canonical by the thinking-order cache.
+- **A cache breakpoint riding a dropped tool is preserved.** When
+  `filter-tools` removes the last tool and it carried `cache_control`, the
+  marker moves to the new last kept tool instead of silently turning every
+  subsequent request into a full prompt-cache miss.
+- **Deferred tools (ToolSearch) no longer cause over-trimming.** With
+  `ToolSearch` present, the request's tools array is not the full reachable
+  set, so MCP-instructions sections and the skills catalog are kept rather
+  than dropped for servers whose tools are merely deferred.
+- **Skills-catalog-before-MCP layout fails open.** If the catalog marker
+  appears before the `# MCP Server Instructions` heading (a layout change),
+  the message is kept verbatim instead of gambling on the split.
+
+### Changed
+- **The no-narration steer moved to a recency tail.** It rode the reduced
+  system block before; now a new `inject-narration-tail` transform appends it
+  as a tiny `role:"system"` message at the end of `messages`, re-stamped every
+  turn just before generation. Recency is the lever — cached ~100K tokens
+  behind the conversation it faded on long sessions; at the tail it holds
+  (~3% narration vs ~12% cached vs ~28% unguided on a multi-turn coding task,
+  Opus 4.8). Cache-safe (sits after Claude Code's last breakpoint, so it never
+  enters the cached prefix and never accumulates) and gated on tool-bearing
+  turns. The no-shell directive stays in the cached block — unlike narration it
+  is not recency-sensitive.
+- **Client disconnect now aborts the upstream stream.** Draining to
+  completion kept the model generating — and billing — a reply nobody would
+  see; aborting matches what Claude Code gets without a proxy. The partial
+  body is still logged, marked with the disconnect.
+- **`Accept-Encoding` is no longer forwarded.** The proxy transparently
+  decompresses upstream responses, so the negotiated codec must match
+  aiohttp's capability, not the client's advertisement (a client advertising
+  `br` on a machine without the codec would have broken every response).
+- **Synthetic SSE no longer emits `data: [DONE]`.** Real Anthropic streams
+  terminate on `message_stop`; the OpenAI-style sentinel was the one
+  non-mimicking byte in the short-circuit synthesis.
+- **Data paths respect `CLAWBACK_HOME`.** New env var; running from a
+  checkout keeps the historical layout (tools.json / logs next to
+  pyproject.toml), while a pip-installed `clawback` now uses `~/.clawback`
+  instead of writing into `site-packages`.
+
+### Added
+- **The proxy measures its own savings.** Every mutated request records
+  `bytes_removed` (and short-circuits record `bytes_unsent`) in the JSON
+  record, the index, and the markdown header — the README's receipt, now
+  reproducible from your own traffic.
+- **`python -m clawback.stats [run-dir]`** aggregates a run's `index.jsonl`:
+  per-transform and short-circuit hit counts (a count falling to zero is the
+  drift signal that detection needs updating), bytes/tokens removed and
+  unsent, and summed billed usage.
+- **SSE parser hardening (log/repair path only).** CRLF record separators,
+  `data:` without the optional space, multi-`data`-line events, and verbatim
+  payload samples of unknown event types (capped) — the evidence trail for
+  upstream format drift.
+- **Form-3 test suite.** The selective trimming of inline `role:"system"`
+  messages (nudges, MCP instructions, skills catalog) — previously the most
+  intricate untested logic in the repo — plus tests for every fix above
+  (83 tests total, up from 59).
+- Friendly startup error for a non-integer `PROXY_PORT`; markdown log views
+  now label which side of the proxy each header section shows.
+
 ## [0.5.0] — 2026-06-09
 
 Compatibility pass for the Fable model family (`claude-fable-5`) and

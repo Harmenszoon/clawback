@@ -51,6 +51,14 @@ There are two entry points:
                               the file with `true` and persisted, so the
                               user always has visibility into what's
                               available. See `tool_filter.py`.
+    inject-narration-tail     Appends the no-narration steer as a tiny
+                              `role:"system"` message at the very end of the
+                              messages array — the highest-recency slot, re-
+                              stamped every turn just before generation. Tail
+                              placement suppresses narration far better than the
+                              same text cached in the system block on long
+                              sessions. Gated on tools being present; cache-safe
+                              (sits after Claude Code's last cache breakpoint).
 
 # Detection strategy
 
@@ -115,7 +123,10 @@ def _is_title_gen(body: dict) -> bool:
     """True iff the request is asking for a JSON title back.
 
     Stable across changes to prompt wording, model, effort, and message
-    shape — depends only on the call's declared output schema.
+    shape — depends only on the call's declared output schema. The schema
+    must be *exactly* `{"title"}`: a future feature asking for, say,
+    `{"title", "description"}` is a different call and must not be hijacked
+    with a synthetic conversation label.
     """
     fmt = (body.get("output_config") or {}).get("format") or {}
     if fmt.get("type") != "json_schema":
@@ -123,7 +134,7 @@ def _is_title_gen(body: dict) -> bool:
     schema = fmt.get("schema") or {}
     required = schema.get("required") or []
     properties = schema.get("properties") or {}
-    return "title" in required and "title" in properties
+    return "title" in required and set(properties) == {"title"}
 
 
 # Claude Code injects this exact prompt as a string-content user message
@@ -215,7 +226,9 @@ def to_sse_bytes(response: dict) -> bytes:
 
     Emits the minimal sequence Claude Code expects for a single-text-block
     streaming response: message_start, content_block_start/delta/stop,
-    message_delta, message_stop, then `data: [DONE]`.
+    message_delta, message_stop. Mirrors the real API exactly — Anthropic
+    streams terminate on message_stop and never emit an OpenAI-style
+    `data: [DONE]` sentinel, so neither do we.
     """
     parts: list[bytes] = []
 
@@ -288,7 +301,6 @@ def to_sse_bytes(response: dict) -> bytes:
     )
 
     parts.append(_event("message_stop", {"type": "message_stop"}))
-    parts.append(b"data: [DONE]\n\n")
     return b"".join(parts)
 
 
@@ -344,12 +356,72 @@ def apply_request_transforms(body: Any) -> tuple[Any, list[str]]:
         for t in (tools_list if isinstance(tools_list, list) else [])
         if isinstance(t, dict) and isinstance(t.get("name"), str)
     }
-    stripped = _strip_system_reminders(body, enabled_tool_names, tools_known=isinstance(tools_list, list))
+    # Claude Code's deferred-tools mechanism (the ToolSearch tool) makes the
+    # request's tools array non-exhaustive: MCP and rarely-used built-in tools
+    # can be absent here yet loadable on demand mid-conversation. "Not in the
+    # tools array" then no longer proves "not reachable", so when ToolSearch is
+    # present the form-3 trimmer must treat the tool set as unknown and keep
+    # tool guidance it cannot prove dead (fail open) rather than dropping MCP
+    # sections for servers whose tools are merely deferred.
+    tools_known = isinstance(tools_list, list) and "ToolSearch" not in enabled_tool_names
+    stripped = _strip_system_reminders(body, enabled_tool_names, tools_known=tools_known)
     if stripped is not None:
         body = stripped
         applied.append("strip-system-reminders")
 
+    # Injected LAST so the guard is the genuine final message — the highest-
+    # recency slot, read by the model immediately before it generates.
+    injected = _inject_narration_tail(body)
+    if injected is not None:
+        body = injected
+        applied.append("inject-narration-tail")
+
     return body, applied
+
+
+# ---------------------------------------------------------------------------
+# inject-narration-tail
+# ---------------------------------------------------------------------------
+#
+# The no-narration steer rides a tiny `role:"system"` message appended to the
+# END of `messages` — the highest-recency position, re-stamped on every request
+# just before the model generates. Recency is the lever (see the note on
+# `_BEHAVIORAL_RULES`): the same text in the cached system block fades across a
+# long session; the tail guard does not.
+#
+# Cache-safe: Claude Code marks its prompt-cache breakpoint on the last *real*
+# message, and the guard is appended after it, so it never enters the cached
+# prefix and never breaks the rolling message cache (verified live — cache-read
+# token counts are unchanged with vs without injection). The client never
+# retains the guard, so it cannot accumulate: exactly one rides the tail of
+# each forwarded request, never two.
+#
+# Gated on tools being present: only real agentic turns get the guard — those
+# carry the mid-conversation-system beta (so a trailing `role:"system"` is
+# accepted) and are where narration happens. Auxiliary calls (the max_tokens=1
+# quota probe, etc.) carry no tools and are left untouched, which both saves
+# the tokens and removes any chance of a proxy-manufactured 400.
+_NARRATION_TAIL_GUARD = (
+    "For your next message: if it uses any tool, it must contain only the tool "
+    "call(s) and no visible text. Save all explanation for one concise final "
+    "message after the tools are done."
+)
+
+
+def _inject_narration_tail(body: dict) -> dict | None:
+    """Append the no-narration guard as a trailing `role:"system"` message.
+
+    Copy-on-write. Returns the modified body, or None when the request carries
+    no tools (not an agentic turn) or has no messages to append to.
+    """
+    tools = body.get("tools")
+    messages = body.get("messages")
+    if not (isinstance(tools, list) and tools):
+        return None
+    if not (isinstance(messages, list) and messages):
+        return None
+    guard = {"role": "system", "content": _NARRATION_TAIL_GUARD}
+    return {**body, "messages": [*messages, guard]}
 
 
 # Claude Code 2.1.x sends its "[1m]" (1M-context) model alias verbatim in
@@ -397,10 +469,21 @@ _MIN_FIELD_MATCHES = 2
 # is a comfortable margin while still ruling out short preambles.
 _MAIN_BLOCK_MIN_CHARS = 5000
 
-# Behavioral rules appended to the reduced block. Single-line, imperative,
-# meant to nudge model defaults back where the discarded prompt would have.
-# Add new rules sparingly — each one consumes prompt budget and the goal of
-# the reduction is to let the model run on defaults.
+# A single behavioral rule appended to the reduced env block: prefer the
+# dedicated tool over a shell. It stays in the CACHED system block (rather than
+# the recency tail) on purpose — a headless A/B found shell-misuse already near
+# zero and unchanged by rule position, so it is not recency-sensitive and the
+# cached slot (cheap, ~0.1x per turn) is the right home. Keep this block tiny;
+# the goal of the reduction is to let the model run on its (good) defaults.
+#
+# The no-NARRATION steer lives SEPARATELY, in a recency tail — see
+# `_NARRATION_TAIL_GUARD` / `_inject_narration_tail`. Narration is the rule the
+# model breaks most, and unlike no-shell it is strongly recency-sensitive: the
+# same text cached here (100K+ tokens behind the conversation) fades across a
+# long session, while a guard re-stamped at the tail just before generation
+# keeps reasserting itself. Measured over this proxy (Opus 4.8, multi-turn
+# coding task): ~3% narration with the tail guard vs ~12% with it cached here
+# vs ~28% unguided.
 _BEHAVIORAL_RULES = (
     "NEVER use shells (Bash, PowerShell) for an operation another available "
     "tool handles. Example: reading a file with cat/Get-Content when a Read "
@@ -561,6 +644,12 @@ def _clean_inline_reminders(block: Any) -> dict | None:
     Handles two payload shapes for tool_result.content:
       - A string (most common — file reads, command output, etc.).
       - A list of sub-blocks (text/image) — walks the text ones only.
+
+    Never produces empty content the API would reject: a string that is
+    *wholly* a reminder is left untouched (fail open — `content: ""` is of
+    uncertain validity upstream), a text sub-block that is wholly a reminder
+    is dropped from the list (the API rejects empty text blocks), and if
+    dropping would empty the whole list the block is left untouched.
     """
     if not isinstance(block, dict):
         return None
@@ -572,7 +661,7 @@ def _clean_inline_reminders(block: Any) -> dict | None:
             if "<system-reminder>" not in inner:
                 return None
             cleaned = _INLINE_REMINDER_RE.sub("", inner)
-            if cleaned == inner:
+            if cleaned == inner or not cleaned.strip():
                 return None
             new_block = dict(block)
             new_block["content"] = cleaned
@@ -584,14 +673,18 @@ def _clean_inline_reminders(block: Any) -> dict | None:
                 if isinstance(sub, dict) and sub.get("type") == "text" and "<system-reminder>" in sub.get("text", ""):
                     cleaned = _INLINE_REMINDER_RE.sub("", sub["text"])
                     if cleaned != sub["text"]:
+                        inner_changed = True
+                        if not cleaned.strip():
+                            continue  # wholly a reminder — drop the sub-block
                         new_sub = dict(sub)
                         new_sub["text"] = cleaned
                         new_inner.append(new_sub)
-                        inner_changed = True
                         continue
                 new_inner.append(sub)
             if not inner_changed:
                 return None
+            if not new_inner:
+                return None  # would empty the tool_result — fail open
             new_block = dict(block)
             new_block["content"] = new_inner
             return new_block
@@ -751,6 +844,13 @@ def _trim_mcp_and_skills_block(text: str, enabled_tool_names: set[str], tools_kn
     enabled_servers = {m.group(1) for name in enabled_tool_names if (m := _MCP_TOOL_NAME_RE.match(name))}
 
     mcp_part, skills_part = _split_off_skills_catalog(text)
+
+    # The split assumes the observed layout: MCP instructions first, skills
+    # catalog last. If the MCP heading turns up *after* the catalog marker, the
+    # layout has changed shape — gating the combined half on `Skill` alone
+    # could silently drop MCP guidance for enabled servers. Keep it verbatim.
+    if _MCP_INSTRUCTIONS_HEADING in skills_part:
+        return text
 
     kept: list[str] = []
 

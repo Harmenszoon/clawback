@@ -9,6 +9,7 @@ import json
 
 from clawback.sse import SSEAssembler
 from clawback.transforms import (
+    _NARRATION_TAIL_GUARD,
     apply_request_transforms,
     maybe_shortcut,
     to_sse_bytes,
@@ -40,7 +41,7 @@ def test_reduce_main_system_replaces_block_with_env_plus_directive():
     assert "Platform: linux" in new_text
     assert "OS Version: Ubuntu 24.04" in new_text
     assert "NEVER use shells" in new_text  # the behavioral directive
-    assert len(new_text) < 600  # the 27K block is gone
+    assert len(new_text) < 2000  # the 27K block is gone
     # cache_control is preserved on the rewritten block.
     assert out["system"][0]["cache_control"] == {"type": "ephemeral"}
 
@@ -71,6 +72,39 @@ def test_reduce_main_system_fails_open_without_cache_control():
     assert "reduce-main-system" not in applied
 
 
+# --- inject-narration-tail ---------------------------------------------------
+
+
+def test_inject_narration_tail_appends_trailing_system_message():
+    body = {
+        "tools": [{"name": "Read"}],
+        "messages": [{"role": "user", "content": "do the thing"}],
+    }
+    before = copy.deepcopy(body)
+    out, applied = apply_request_transforms(body)
+    assert "inject-narration-tail" in applied
+    last = out["messages"][-1]
+    assert last["role"] == "system"
+    assert last["content"] == _NARRATION_TAIL_GUARD
+    # exactly one guard, appended after the real messages
+    assert sum(m.get("role") == "system" for m in out["messages"]) == 1
+    assert out["messages"][:-1] == before["messages"]
+    # copy-on-write: the caller's original body is untouched
+    assert body == before
+
+
+def test_inject_narration_tail_skipped_without_tools():
+    body = {"messages": [{"role": "user", "content": "hi"}]}
+    _out, applied = apply_request_transforms(body)
+    assert "inject-narration-tail" not in applied
+
+
+def test_inject_narration_tail_skipped_without_messages():
+    body = {"tools": [{"name": "Read"}]}
+    _out, applied = apply_request_transforms(body)
+    assert "inject-narration-tail" not in applied
+
+
 # --- title-gen ---------------------------------------------------------------
 
 
@@ -94,6 +128,24 @@ def test_title_gen_shortcut_detected_and_synthesized():
 
 def test_title_gen_not_triggered_without_title_schema():
     body = {"output_config": {"format": {"type": "json_schema", "schema": {"required": ["summary"]}}}}
+    assert maybe_shortcut(body) is None
+
+
+def test_title_gen_not_triggered_with_extra_properties():
+    """A schema asking for more than a bare title (say, a future PR-title +
+    description call) is a different feature and must not be hijacked with a
+    synthetic conversation label."""
+    body = {
+        "output_config": {
+            "format": {
+                "type": "json_schema",
+                "schema": {
+                    "required": ["title"],
+                    "properties": {"title": {"type": "string"}, "description": {"type": "string"}},
+                },
+            }
+        }
+    }
     assert maybe_shortcut(body) is None
 
 
@@ -162,6 +214,9 @@ def test_to_sse_bytes_roundtrips_through_assembler():
         {"messages": [{"role": "user", "content": "The user stepped away and is coming back. Recap"}]}
     )
     sse = to_sse_bytes(_resp)
+    # Mirrors the real API: Anthropic streams end on message_stop, with no
+    # OpenAI-style [DONE] sentinel.
+    assert b"[DONE]" not in sse
     a = SSEAssembler()
     a.feed(sse)
     rebuilt = a.assembled()

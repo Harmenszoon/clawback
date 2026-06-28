@@ -47,7 +47,13 @@ _load_env_file()
 # ---------------------------------------------------------------------------
 
 HOST: str = os.environ.get("PROXY_HOST", "localhost")
-PORT: int = int(os.environ.get("PROXY_PORT", "3456"))
+
+_raw_port = os.environ.get("PROXY_PORT", "3456")
+try:
+    PORT: int = int(_raw_port)
+except ValueError:
+    raise SystemExit(f"PROXY_PORT must be an integer, got {_raw_port!r}") from None
+
 TARGET_BASE: str = os.environ.get("PROXY_TARGET_URL", "https://api.anthropic.com").rstrip("/")
 
 
@@ -55,8 +61,33 @@ TARGET_BASE: str = os.environ.get("PROXY_TARGET_URL", "https://api.anthropic.com
 # Paths
 # ---------------------------------------------------------------------------
 
-PROJECT_ROOT: Path = Path(__file__).parent.parent
-LOGS_ROOT: Path = PROJECT_ROOT / "logs"
+
+def _resolve_data_home() -> Path:
+    """Directory that holds the mutable per-user state: tools.json and logs/.
+
+    Resolution order:
+      1. `CLAWBACK_HOME` (env var or .env) — explicit wins, created if missing.
+      2. The repo root, when running from a checkout (detected by the
+         pyproject.toml sitting next to the package) — the historical layout.
+      3. `~/.clawback` — the pip-installed case, where the package parent is
+         `site-packages` and writing config/logs there would be unwritable at
+         worst and invisible to the user at best.
+    """
+    env = os.environ.get("CLAWBACK_HOME")
+    if env:
+        home = Path(env).expanduser()
+        home.mkdir(parents=True, exist_ok=True)
+        return home
+    pkg_parent = Path(__file__).parent.parent
+    if (pkg_parent / "pyproject.toml").exists():
+        return pkg_parent
+    home = Path.home() / ".clawback"
+    home.mkdir(parents=True, exist_ok=True)
+    return home
+
+
+DATA_HOME: Path = _resolve_data_home()
+LOGS_ROOT: Path = DATA_HOME / "logs"
 
 
 # ---------------------------------------------------------------------------
@@ -71,6 +102,13 @@ REQUEST_STRIP_HEADERS: frozenset[str] = frozenset(
         "host",
         "content-length",  # aiohttp recomputes
         "transfer-encoding",  # aiohttp manages framing
+        # The client's Accept-Encoding advertises what *it* can decode, but the
+        # proxy transparently decompresses upstream responses (Content-Encoding
+        # is stripped below), so the relevant capability is aiohttp's, not the
+        # client's. Forwarding e.g. `br`/`zstd` from a client on a machine where
+        # the codec isn't installed would make every compressed response fail.
+        # Dropping the header lets aiohttp negotiate exactly what it can decode.
+        "accept-encoding",
         "connection",
         "keep-alive",
         "proxy-authenticate",

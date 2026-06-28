@@ -151,3 +151,62 @@ def test_tool_result_list_content_reminder_excised():
     assert "strip-system-reminders" in applied
     sub = new_body["messages"][0]["content"][0]["content"][0]
     assert "<system-reminder>" not in sub["text"]
+
+
+def test_tool_result_subblock_wholly_reminder_is_dropped_not_emptied():
+    """A text sub-block that is nothing but a reminder must be removed from the
+    list, never left behind as `{"type":"text","text":""}` — the API rejects
+    empty text blocks, and a proxy-manufactured 400 violates fail-open."""
+    new_body, applied = _transform(
+        [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "t1",
+                        "content": [
+                            {"type": "text", "text": "real output"},
+                            {"type": "text", "text": REMINDER},
+                        ],
+                    },
+                ],
+            },
+        ]
+    )
+    assert "strip-system-reminders" in applied
+    inner = new_body["messages"][0]["content"][0]["content"]
+    assert inner == [{"type": "text", "text": "real output"}]
+
+
+def test_tool_result_sole_wholly_reminder_subblock_fails_open():
+    """If excising the reminder would leave the tool_result's content list
+    empty, leave the block untouched instead — forwarding the reminder costs a
+    few tokens; forwarding empty content risks an upstream 400."""
+    content = [{"type": "text", "text": REMINDER}]
+    new_body, applied = _transform(
+        [
+            {
+                "role": "user",
+                "content": [{"type": "tool_result", "tool_use_id": "t1", "content": content}],
+            },
+        ]
+    )
+    assert "strip-system-reminders" not in applied
+    assert new_body["messages"][0]["content"][0]["content"] == content
+
+
+def test_tool_result_string_wholly_reminder_fails_open():
+    """String content that is entirely a reminder is left alone rather than
+    stripped to ""; empty-string tool_result content is of uncertain validity
+    upstream, and fail-open means never gambling on that."""
+    new_body, applied = _transform(
+        [
+            {
+                "role": "user",
+                "content": [{"type": "tool_result", "tool_use_id": "t1", "content": REMINDER}],
+            },
+        ]
+    )
+    assert "strip-system-reminders" not in applied
+    assert new_body["messages"][0]["content"][0]["content"] == REMINDER

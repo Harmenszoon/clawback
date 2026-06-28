@@ -7,11 +7,15 @@ it anywhere other than your own machine.
 ## Threat model / intended deployment
 
 - **Single-user, localhost only.** The proxy binds to `localhost:3456` by
-  default and has **no authentication**. Anyone who can reach the listening
-  socket can send requests through it using your upstream credentials. Do not
-  bind it to a public interface (`PROXY_HOST`) or expose the port.
+  default and has **no authentication**. The proxy itself holds and adds no
+  credentials — it forwards whatever `Authorization` / `x-api-key` headers
+  each client sends — so an attacker reaching the socket cannot spend *your*
+  quota. What they can do is relay their own traffic through your machine
+  (hiding their origin) and grow your logs without bound. Do not bind it to
+  a public interface (`PROXY_HOST`) or expose the port.
 - **It forwards your real API credentials upstream.** The `Authorization` /
-  `x-api-key` headers are passed through to `api.anthropic.com` unchanged.
+  `x-api-key` headers your client sends are passed through to
+  `api.anthropic.com` unchanged on every request (and redacted in the logs).
 - **Request bodies are unbounded** (`client_max_size=0`) by design, which is
   fine for a local single client but unsafe on an exposed interface.
 
