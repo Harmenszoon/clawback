@@ -69,9 +69,7 @@ def _system_messages(body: dict) -> list[str]:
     # trailing role:"system" message); these tests cover form-3 reminder
     # stripping only.
     return [
-        m["content"]
-        for m in body["messages"]
-        if m.get("role") == "system" and m["content"] != _NARRATION_TAIL_GUARD
+        m["content"] for m in body["messages"] if m.get("role") == "system" and m["content"] != _NARRATION_TAIL_GUARD
     ]
 
 
